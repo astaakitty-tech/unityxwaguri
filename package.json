@@ -1,0 +1,18 @@
+{
+  "name": "minecraft-kitpvp-bot",
+  "version": "2.0.0",
+  "description": "Discord bot for Minecraft KitPvP with auto-heal, PVP list and friend system",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "canvas": "^3.2.3",
+    "discord.js": "^14.27.0",
+    "dotenv": "^16.6.1",
+    "minecraft-data": "^3.111.0",
+    "mineflayer": "^4.37.1",
+    "mineflayer-pathfinder": "^2.4.5",
+    "vec3": "^0.2.0"
+  }
+}
