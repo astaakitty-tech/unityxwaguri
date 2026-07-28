@@ -1,7 +1,7 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const mineflayer = require('mineflayer');
-const { createCanvas, loadImage } = require('canvas');
+const { createCanvas, loadImage, registerFont } = require('canvas');
 const path = require('path');
 const fs = require('fs');
 
@@ -23,7 +23,7 @@ const DISCORD_CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 const MINECRAFT_HOST = process.env.MINECRAFT_HOST || 'localhost';
 const MINECRAFT_PORT = parseInt(process.env.MINECRAFT_PORT) || 25565;
 const MINECRAFT_USERNAME = process.env.MINECRAFT_USERNAME || 'DiscordBot';
-const MINECRAFT_VERSION = process.env.MINECRAFT_VERSION || '1.20.4';
+const MINECRAFT_VERSION = process.env.MINECRAFT_VERSION || '1.8.9';
 const SERVER_PASSWORD = process.env.SERVER_PASSWORD || null;
 const DATA_FILE = path.join(__dirname, 'data.json');
 
@@ -139,7 +139,7 @@ function getFriendGradient(index, total) {
     return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
-// --- ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ ТАБЛИЦЫ ---
+// --- ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ ТАБЛИЦЫ (MINECRAFT СТИЛЬ) ---
 async function generateTabImage() {
     if (!bot || !isConnected) return null;
     
@@ -156,7 +156,7 @@ async function generateTabImage() {
     friends.sort((a, b) => a.ping - b.ping);
     others.sort((a, b) => a.ping - b.ping);
     
-    // Формируем колонки
+    // Формируем колонки по 20 игроков
     const allCols = [];
     const allHeaders = [];
     
@@ -185,64 +185,46 @@ async function generateTabImage() {
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
     
-    // --- ФОН ---
-    let background = null;
-    const bgPath = path.join(__dirname, 'images', 'bg.png');
+    // --- ФОН (ТЁМНЫЙ, БЕЗ ПОЛОСОК) ---
+    const gradient = ctx.createLinearGradient(0, 0, width, height);
+    gradient.addColorStop(0, '#0a0a1a');
+    gradient.addColorStop(0.5, '#1a1a2e');
+    gradient.addColorStop(1, '#0a0a1a');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
     
-    try {
-        if (fs.existsSync(bgPath)) {
-            background = await loadImage(bgPath);
-            console.log('✅ Фон загружен!');
-        } else {
-            console.log('⚠️ Файл фона не найден:', bgPath);
-        }
-    } catch (err) {
-        console.log('⚠️ Ошибка загрузки фона:', err.message);
-    }
-    
-    if (background) {
-        ctx.drawImage(background, 0, 0, width, height);
-    } else {
-        const gradient = ctx.createLinearGradient(0, 0, width, height);
-        gradient.addColorStop(0, '#0f0c29');
-        gradient.addColorStop(0.5, '#302b63');
-        gradient.addColorStop(1, '#24243e');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, width, height);
-    }
-    
-    // --- ЗАГОЛОВОК ---
+    // --- ЗАГОЛОВОК (СТИЛЬ MINECRAFT) ---
     ctx.fillStyle = '#ffffff';
     ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-    ctx.shadowBlur = 30;
-    ctx.font = 'bold 50px "Segoe UI", sans-serif';
+    ctx.shadowBlur = 20;
+    ctx.font = 'bold 60px "Courier New", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('⚔️ UNITY', width / 2, 80);
-    ctx.font = '26px "Segoe UI", sans-serif';
-    ctx.fillStyle = '#aaaaee';
-    ctx.fillText(`Всего: ${players.length} игроков`, width / 2, 125);
+    ctx.fillText('⚔️ UNITY', width / 2, 90);
+    ctx.font = '28px "Courier New", monospace';
+    ctx.fillStyle = '#88aacc';
+    ctx.fillText(`Всего: ${players.length} игроков`, width / 2, 140);
     ctx.shadowBlur = 0;
     
     // --- РАСЧЁТ КОЛОНОК ---
     const numCols = allCols.length;
     const maxColsPerRow = 5;
-    const colWidth = Math.min(360, (width - 100) / Math.min(numCols, maxColsPerRow));
-    const startY = 165;
-    const headerHeight = 38;
-    const rowHeight = 32;
-    const padding = 6;
-    const rowGap = 15;
+    const colWidth = Math.min(350, (width - 120) / Math.min(numCols, maxColsPerRow));
+    const startY = 180;
+    const headerHeight = 40;
+    const rowHeight = 34;
+    const padding = 8;
+    const rowGap = 20;
     
-    let fontSize = 18;
+    let fontSize = 20;
     const maxRows = Math.max(...allCols.map(col => col.length));
-    if (maxRows > 20) fontSize = 16;
-    if (maxRows > 25) fontSize = 14;
-    if (maxRows > 30) fontSize = 13;
-    if (maxRows > 35) fontSize = 12;
+    if (maxRows > 20) fontSize = 18;
+    if (maxRows > 25) fontSize = 16;
+    if (maxRows > 30) fontSize = 14;
+    if (maxRows > 35) fontSize = 13;
     
     const totalRows = Math.ceil(numCols / maxColsPerRow);
     
-    // --- РИСУЕМ КАЖДУЮ КОЛОНКУ ---
+    // --- РИСУЕМ КАЖДУЮ КОЛОНКУ (БЕЗ СЕРЫХ ПОЛОСОК) ---
     allCols.forEach((col, index) => {
         const rowIndex = Math.floor(index / maxColsPerRow);
         const colIndex = index % maxColsPerRow;
@@ -250,84 +232,85 @@ async function generateTabImage() {
         const colsInRow = Math.min(maxColsPerRow, numCols - rowIndex * maxColsPerRow);
         const rowStartX = (width - (colWidth * colsInRow)) / 2;
         const x = rowStartX + colIndex * colWidth;
-        const y = startY + rowIndex * (headerHeight + maxRows * rowHeight + padding * 2 + rowGap + 20);
+        const y = startY + rowIndex * (headerHeight + maxRows * rowHeight + padding * 2 + rowGap + 25);
         
         const colRows = col.length;
         const totalHeight = headerHeight + colRows * rowHeight + padding * 2;
         
-        // Фон колонки
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        // --- ФОН КОЛОНКИ (ПРОЗРАЧНЫЙ, БЕЗ ПОЛОСОК) ---
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
         ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-        ctx.shadowBlur = 20;
+        ctx.shadowBlur = 15;
         ctx.beginPath();
-        ctx.roundRect(x, y, colWidth - 6, totalHeight, 10);
+        ctx.roundRect(x, y, colWidth - 6, totalHeight, 8);
         ctx.fill();
         ctx.shadowBlur = 0;
         
-        // Заголовок колонки
+        // --- ЗАГОЛОВОК КОЛОНКИ (MINECRAFT СТИЛЬ) ---
         ctx.fillStyle = '#ffffff';
-        ctx.font = `bold ${fontSize + 1}px "Segoe UI", sans-serif`;
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+        ctx.shadowBlur = 8;
+        ctx.font = `bold ${fontSize + 2}px "Courier New", monospace`;
         ctx.textAlign = 'center';
-        ctx.fillText(allHeaders[index], x + (colWidth - 6) / 2, y + 28);
+        ctx.fillText(allHeaders[index], x + (colWidth - 6) / 2, y + 30);
+        ctx.shadowBlur = 0;
         
-        // Разделитель
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        // --- РАЗДЕЛИТЕЛЬ (ТОНКИЙ, БЕЗ СЕРОЙ ПОЛОСЫ) ---
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(x + 8, y + 35);
-        ctx.lineTo(x + colWidth - 14, y + 35);
+        ctx.moveTo(x + 10, y + 38);
+        ctx.lineTo(x + colWidth - 16, y + 38);
         ctx.stroke();
         
-        // Строки
+        // --- СТРОКИ (БЕЗ ПОЛОСОК) ---
         let yPos = y + headerHeight + padding;
         col.forEach((player, idx) => {
-            if (idx % 2 === 0) {
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-                ctx.fillRect(x + 4, yPos - 3, colWidth - 14, rowHeight - 2);
-            }
-            
+            // Цвет имени
             let color;
             if (player.isFriend) color = '#66ff88';
             else if (player.isEnemy) color = '#ff6b6b';
             else color = '#c8d6e5';
             
+            // --- ИМЯ (MINECRAFT СТИЛЬ) ---
             ctx.fillStyle = color;
-            ctx.font = `${fontSize}px "Segoe UI", sans-serif`;
+            ctx.font = `${fontSize}px "Courier New", monospace`;
             ctx.textAlign = 'left';
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
             ctx.shadowBlur = 6;
             
             let nameToDisplay = player.name;
             let testWidth = ctx.measureText(nameToDisplay).width;
-            const maxNameWidth = colWidth - 65;
+            const maxNameWidth = colWidth - 60;
             
             if (testWidth > maxNameWidth) {
                 let tempFontSize = fontSize;
                 while (testWidth > maxNameWidth && tempFontSize > 8) {
                     tempFontSize--;
-                    ctx.font = `${tempFontSize}px "Segoe UI", sans-serif`;
+                    ctx.font = `${tempFontSize}px "Courier New", monospace`;
                     testWidth = ctx.measureText(nameToDisplay).width;
                 }
-                ctx.font = `${tempFontSize}px "Segoe UI", sans-serif`;
+                ctx.font = `${tempFontSize}px "Courier New", monospace`;
             }
             
-            ctx.fillText(nameToDisplay, x + 8, yPos + 8);
+            ctx.fillText(nameToDisplay, x + 10, yPos + 8);
             ctx.shadowBlur = 0;
             
+            // --- ПИНГ (MINECRAFT СТИЛЬ) ---
             ctx.fillStyle = '#8899bb';
             ctx.textAlign = 'right';
-            ctx.font = `${fontSize - 2}px "Segoe UI", sans-serif`;
-            ctx.fillText(`${player.ping}ms`, x + colWidth - 14, yPos + 8);
+            ctx.font = `${fontSize - 2}px "Courier New", monospace`;
+            ctx.fillText(`${player.ping}ms`, x + colWidth - 16, yPos + 8);
             
             yPos += rowHeight;
         });
     });
     
     // --- ФУТЕР ---
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-    ctx.font = '16px "Segoe UI", sans-serif';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.font = '18px "Courier New", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(`Обновлено: ${new Date().toLocaleString()}`, width / 2, height - 20);
+    ctx.fillText(`Обновлено: ${new Date().toLocaleString()}`, width / 2, height - 25);
     
     return canvas.toBuffer();
 }
@@ -647,7 +630,7 @@ client.on('messageCreate', async (message) => {
         await message.reply('🗑️ Список врагов очищен.');
     }
 
-    // --- !tab --- (ИЗОБРАЖЕНИЕ)
+    // --- !tab ---
     else if (command === 'tab' && !args[0]) {
         if (!isConnected || !bot) {
             await message.reply('❌ Бот не подключен!');
