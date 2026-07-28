@@ -1,7 +1,7 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const mineflayer = require('mineflayer');
-const { createCanvas, loadImage, registerFont } = require('canvas');
+const { createCanvas, loadImage } = require('canvas');
 const path = require('path');
 const fs = require('fs');
 
@@ -139,7 +139,7 @@ function getFriendGradient(index, total) {
     return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
-// --- ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ ТАБЛИЦЫ (MINECRAFT СТИЛЬ) ---
+// --- ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ ТАБЛИЦЫ (С ВАШИМ ФОНОМ) ---
 async function generateTabImage() {
     if (!bot || !isConnected) return null;
     
@@ -185,12 +185,38 @@ async function generateTabImage() {
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
     
-    // --- ФОН (ТЁМНЫЙ, БЕЗ ПОЛОСОК) ---
-    const gradient = ctx.createLinearGradient(0, 0, width, height);
-    gradient.addColorStop(0, '#0a0a1a');
-    gradient.addColorStop(0.5, '#1a1a2e');
-    gradient.addColorStop(1, '#0a0a1a');
-    ctx.fillStyle = gradient;
+    // --- ЗАГРУЗКА ВАШЕГО ФОНА ---
+    let background = null;
+    const bgPath = path.join(__dirname, 'images', 'bg.png');
+    
+    try {
+        if (fs.existsSync(bgPath)) {
+            background = await loadImage(bgPath);
+            console.log('✅ Ваш фон загружен!');
+        } else {
+            console.log('⚠️ Ваш фон не найден по пути:', bgPath);
+            console.log('   Использую тёмный фон по умолчанию');
+        }
+    } catch (err) {
+        console.log('⚠️ Ошибка загрузки фона:', err.message);
+    }
+    
+    // --- РИСУЕМ ФОН ---
+    if (background) {
+        // Растягиваем ваш фон на весь экран
+        ctx.drawImage(background, 0, 0, width, height);
+    } else {
+        // Запасной вариант — тёмный градиент (если нет вашего фона)
+        const gradient = ctx.createLinearGradient(0, 0, width, height);
+        gradient.addColorStop(0, '#0a0a1a');
+        gradient.addColorStop(0.5, '#1a1a2e');
+        gradient.addColorStop(1, '#0a0a1a');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+    }
+    
+    // --- ЛЁГКОЕ ЗАТЕМНЕНИЕ ДЛЯ ЧИТАЕМОСТИ ТЕКСТА ---
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
     ctx.fillRect(0, 0, width, height);
     
     // --- ЗАГОЛОВОК (СТИЛЬ MINECRAFT) ---
@@ -224,7 +250,7 @@ async function generateTabImage() {
     
     const totalRows = Math.ceil(numCols / maxColsPerRow);
     
-    // --- РИСУЕМ КАЖДУЮ КОЛОНКУ (БЕЗ СЕРЫХ ПОЛОСОК) ---
+    // --- РИСУЕМ КАЖДУЮ КОЛОНКУ ---
     allCols.forEach((col, index) => {
         const rowIndex = Math.floor(index / maxColsPerRow);
         const colIndex = index % maxColsPerRow;
@@ -237,8 +263,8 @@ async function generateTabImage() {
         const colRows = col.length;
         const totalHeight = headerHeight + colRows * rowHeight + padding * 2;
         
-        // --- ФОН КОЛОНКИ (ПРОЗРАЧНЫЙ, БЕЗ ПОЛОСОК) ---
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+        // --- ФОН КОЛОНКИ (ПРОЗРАЧНЫЙ) ---
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
         ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
         ctx.shadowBlur = 15;
         ctx.beginPath();
@@ -246,7 +272,7 @@ async function generateTabImage() {
         ctx.fill();
         ctx.shadowBlur = 0;
         
-        // --- ЗАГОЛОВОК КОЛОНКИ (MINECRAFT СТИЛЬ) ---
+        // --- ЗАГОЛОВОК КОЛОНКИ ---
         ctx.fillStyle = '#ffffff';
         ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
         ctx.shadowBlur = 8;
@@ -255,7 +281,7 @@ async function generateTabImage() {
         ctx.fillText(allHeaders[index], x + (colWidth - 6) / 2, y + 30);
         ctx.shadowBlur = 0;
         
-        // --- РАЗДЕЛИТЕЛЬ (ТОНКИЙ, БЕЗ СЕРОЙ ПОЛОСЫ) ---
+        // --- РАЗДЕЛИТЕЛЬ ---
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -263,7 +289,7 @@ async function generateTabImage() {
         ctx.lineTo(x + colWidth - 16, y + 38);
         ctx.stroke();
         
-        // --- СТРОКИ (БЕЗ ПОЛОСОК) ---
+        // --- СТРОКИ ---
         let yPos = y + headerHeight + padding;
         col.forEach((player, idx) => {
             // Цвет имени
@@ -272,7 +298,7 @@ async function generateTabImage() {
             else if (player.isEnemy) color = '#ff6b6b';
             else color = '#c8d6e5';
             
-            // --- ИМЯ (MINECRAFT СТИЛЬ) ---
+            // --- ИМЯ ---
             ctx.fillStyle = color;
             ctx.font = `${fontSize}px "Courier New", monospace`;
             ctx.textAlign = 'left';
@@ -296,7 +322,7 @@ async function generateTabImage() {
             ctx.fillText(nameToDisplay, x + 10, yPos + 8);
             ctx.shadowBlur = 0;
             
-            // --- ПИНГ (MINECRAFT СТИЛЬ) ---
+            // --- ПИНГ ---
             ctx.fillStyle = '#8899bb';
             ctx.textAlign = 'right';
             ctx.font = `${fontSize - 2}px "Courier New", monospace`;
