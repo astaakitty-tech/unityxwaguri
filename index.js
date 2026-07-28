@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const mineflayer = require('mineflayer');
+const { createCanvas, loadImage } = require('canvas');
 const path = require('path');
 const fs = require('fs');
 
@@ -126,6 +127,211 @@ function getPlayers() {
     return players;
 }
 
+// --- ГЕНЕРАЦИЯ ГРАДИЕНТА ДЛЯ ДРУЗЕЙ ---
+function getFriendGradient(index, total) {
+    if (total === 0) return '#00FF00';
+    const startR = 0, startG = 255, startB = 0;
+    const endR = 128, endG = 0, endB = 255;
+    const ratio = total > 1 ? index / (total - 1) : 0;
+    const r = Math.round(startR + (endR - startR) * ratio);
+    const g = Math.round(startG + (endG - startG) * ratio);
+    const b = Math.round(startB + (endB - startB) * ratio);
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
+// --- ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ ТАБЛИЦЫ ---
+async function generateTabImage() {
+    if (!bot || !isConnected) return null;
+    
+    const players = getPlayers();
+    if (players.length === 0) return null;
+    
+    // Разделяем на категории
+    const enemies = players.filter(p => p.isEnemy);
+    const friends = players.filter(p => p.isFriend);
+    const others = players.filter(p => !p.isEnemy && !p.isFriend);
+    
+    // Сортируем по пингу
+    enemies.sort((a, b) => a.ping - b.ping);
+    friends.sort((a, b) => a.ping - b.ping);
+    others.sort((a, b) => a.ping - b.ping);
+    
+    // Формируем колонки
+    const allCols = [];
+    const allHeaders = [];
+    
+    function splitIntoColumns(data, header) {
+        const cols = [];
+        const maxPerCol = 20;
+        for (let i = 0; i < data.length; i += maxPerCol) {
+            cols.push(data.slice(i, i + maxPerCol));
+        }
+        return cols;
+    }
+    
+    const friendCols = splitIntoColumns(friends, '🤝 ДРУЗЬЯ');
+    const otherCols = splitIntoColumns(others, '👤 ИГРОКИ');
+    const enemyCols = splitIntoColumns(enemies, '👿 ВРАГИ');
+    
+    friendCols.forEach(col => { allCols.push(col); allHeaders.push('🤝 ДРУЗЬЯ'); });
+    otherCols.forEach(col => { allCols.push(col); allHeaders.push('👤 ИГРОКИ'); });
+    enemyCols.forEach(col => { allCols.push(col); allHeaders.push('👿 ВРАГИ'); });
+    
+    if (allCols.length === 0) return null;
+    
+    const width = 1920;
+    const height = 1080;
+    
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+    
+    // --- ФОН ---
+    let background = null;
+    const bgPath = path.join(__dirname, 'images', 'bg.png');
+    
+    try {
+        if (fs.existsSync(bgPath)) {
+            background = await loadImage(bgPath);
+            console.log('✅ Фон загружен!');
+        } else {
+            console.log('⚠️ Файл фона не найден:', bgPath);
+        }
+    } catch (err) {
+        console.log('⚠️ Ошибка загрузки фона:', err.message);
+    }
+    
+    if (background) {
+        ctx.drawImage(background, 0, 0, width, height);
+    } else {
+        const gradient = ctx.createLinearGradient(0, 0, width, height);
+        gradient.addColorStop(0, '#0f0c29');
+        gradient.addColorStop(0.5, '#302b63');
+        gradient.addColorStop(1, '#24243e');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+    }
+    
+    // --- ЗАГОЛОВОК ---
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+    ctx.shadowBlur = 30;
+    ctx.font = 'bold 50px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('⚔️ UNITY', width / 2, 80);
+    ctx.font = '26px "Segoe UI", sans-serif';
+    ctx.fillStyle = '#aaaaee';
+    ctx.fillText(`Всего: ${players.length} игроков`, width / 2, 125);
+    ctx.shadowBlur = 0;
+    
+    // --- РАСЧЁТ КОЛОНОК ---
+    const numCols = allCols.length;
+    const maxColsPerRow = 5;
+    const colWidth = Math.min(360, (width - 100) / Math.min(numCols, maxColsPerRow));
+    const startY = 165;
+    const headerHeight = 38;
+    const rowHeight = 32;
+    const padding = 6;
+    const rowGap = 15;
+    
+    let fontSize = 18;
+    const maxRows = Math.max(...allCols.map(col => col.length));
+    if (maxRows > 20) fontSize = 16;
+    if (maxRows > 25) fontSize = 14;
+    if (maxRows > 30) fontSize = 13;
+    if (maxRows > 35) fontSize = 12;
+    
+    const totalRows = Math.ceil(numCols / maxColsPerRow);
+    
+    // --- РИСУЕМ КАЖДУЮ КОЛОНКУ ---
+    allCols.forEach((col, index) => {
+        const rowIndex = Math.floor(index / maxColsPerRow);
+        const colIndex = index % maxColsPerRow;
+        
+        const colsInRow = Math.min(maxColsPerRow, numCols - rowIndex * maxColsPerRow);
+        const rowStartX = (width - (colWidth * colsInRow)) / 2;
+        const x = rowStartX + colIndex * colWidth;
+        const y = startY + rowIndex * (headerHeight + maxRows * rowHeight + padding * 2 + rowGap + 20);
+        
+        const colRows = col.length;
+        const totalHeight = headerHeight + colRows * rowHeight + padding * 2;
+        
+        // Фон колонки
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+        ctx.shadowBlur = 20;
+        ctx.beginPath();
+        ctx.roundRect(x, y, colWidth - 6, totalHeight, 10);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        
+        // Заголовок колонки
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `bold ${fontSize + 1}px "Segoe UI", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText(allHeaders[index], x + (colWidth - 6) / 2, y + 28);
+        
+        // Разделитель
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x + 8, y + 35);
+        ctx.lineTo(x + colWidth - 14, y + 35);
+        ctx.stroke();
+        
+        // Строки
+        let yPos = y + headerHeight + padding;
+        col.forEach((player, idx) => {
+            if (idx % 2 === 0) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+                ctx.fillRect(x + 4, yPos - 3, colWidth - 14, rowHeight - 2);
+            }
+            
+            let color;
+            if (player.isFriend) color = '#66ff88';
+            else if (player.isEnemy) color = '#ff6b6b';
+            else color = '#c8d6e5';
+            
+            ctx.fillStyle = color;
+            ctx.font = `${fontSize}px "Segoe UI", sans-serif`;
+            ctx.textAlign = 'left';
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+            ctx.shadowBlur = 6;
+            
+            let nameToDisplay = player.name;
+            let testWidth = ctx.measureText(nameToDisplay).width;
+            const maxNameWidth = colWidth - 65;
+            
+            if (testWidth > maxNameWidth) {
+                let tempFontSize = fontSize;
+                while (testWidth > maxNameWidth && tempFontSize > 8) {
+                    tempFontSize--;
+                    ctx.font = `${tempFontSize}px "Segoe UI", sans-serif`;
+                    testWidth = ctx.measureText(nameToDisplay).width;
+                }
+                ctx.font = `${tempFontSize}px "Segoe UI", sans-serif`;
+            }
+            
+            ctx.fillText(nameToDisplay, x + 8, yPos + 8);
+            ctx.shadowBlur = 0;
+            
+            ctx.fillStyle = '#8899bb';
+            ctx.textAlign = 'right';
+            ctx.font = `${fontSize - 2}px "Segoe UI", sans-serif`;
+            ctx.fillText(`${player.ping}ms`, x + colWidth - 14, yPos + 8);
+            
+            yPos += rowHeight;
+        });
+    });
+    
+    // --- ФУТЕР ---
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.font = '16px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Обновлено: ${new Date().toLocaleString()}`, width / 2, height - 20);
+    
+    return canvas.toBuffer();
+}
+
 // --- ПОДКЛЮЧЕНИЕ К MINECRAFT ---
 function connectMinecraft() {
     if (isConnected) {
@@ -235,7 +441,7 @@ function disconnectMinecraft() {
     sendDiscordMessage('❌ Бот отключён');
 }
 
-// --- КОМАНДЫ DISCORD ---
+// --- ОБРАБОТЧИКИ DISCORD ---
 client.on('ready', () => {
     console.log(`✅ Discord бот ${client.user.tag} запущен!`);
     console.log(`📡 Сервер: ${MINECRAFT_HOST}`);
@@ -441,51 +647,33 @@ client.on('messageCreate', async (message) => {
         await message.reply('🗑️ Список врагов очищен.');
     }
 
-    // --- !tab ---
+    // --- !tab --- (ИЗОБРАЖЕНИЕ)
     else if (command === 'tab' && !args[0]) {
         if (!isConnected || !bot) {
             await message.reply('❌ Бот не подключен!');
             return;
         }
         
-        const players = getPlayers();
-        if (players.length === 0) {
-            await message.reply('📋 На сервере никого нет.');
-            return;
+        try {
+            const imageBuffer = await generateTabImage();
+            if (!imageBuffer) {
+                await message.reply('📋 На сервере никого нет.');
+                return;
+            }
+            
+            const channel = client.channels.cache.get(DISCORD_CHANNEL_ID);
+            if (channel) {
+                await channel.send({
+                    files: [{
+                        attachment: imageBuffer,
+                        name: 'tab.png'
+                    }]
+                });
+            }
+        } catch (err) {
+            console.error('❌ Ошибка генерации изображения:', err);
+            await message.reply('❌ Ошибка при создании таблицы.');
         }
-        
-        // Сортируем: враги → друзья → остальные
-        players.sort((a, b) => {
-            if (a.isEnemy && !b.isEnemy) return -1;
-            if (!a.isEnemy && b.isEnemy) return 1;
-            if (a.isFriend && !b.isFriend) return -1;
-            if (!a.isFriend && b.isFriend) return 1;
-            return 0;
-        });
-        
-        let table = '📋 **Таблица игроков**\n';
-        table += '```\n';
-        table += '┌────────────────┬──────────┬────────────┐\n';
-        table += '│ Игрок          │ Пинг     │ Статус     │\n';
-        table += '├────────────────┼──────────┼────────────┤\n';
-        
-        players.slice(0, 40).forEach(p => {
-            const name = p.name.padEnd(14).slice(0, 14);
-            const ping = `${p.ping}ms`.padEnd(8);
-            let status = '👤 Игрок';
-            if (p.isEnemy) status = '👿 ВРАГ';
-            else if (p.isFriend) status = '🤝 ДРУГ';
-            table += `│ ${name} │ ${ping} │ ${status.padEnd(10)} │\n`;
-        });
-        
-        if (players.length > 40) {
-            table += `│ ... и ещё ${players.length - 40} игроков ... │\n`;
-        }
-        
-        table += '└────────────────┴──────────┴────────────┘\n';
-        table += '```';
-        
-        await message.reply(table);
     }
 
     // --- !help ---
@@ -497,19 +685,19 @@ client.on('messageCreate', async (message) => {
                 { name: '🎮 Управление', value: '`!connect` - Подключиться\n`!disconnect` - Отключиться\n`!join <режим>` - Зайти на режим\n`!status` - Статус\n`!say <текст>` - Отправить сообщение', inline: false },
                 { name: '🤝 Друзья', value: '`!friend add <ник>`\n`!friend remove <ник>`\n`!friend list`\n`!friend clear`', inline: true },
                 { name: '👿 Враги', value: '`!enemy add <ник>`\n`!enemy remove <ник>`\n`!enemy list`\n`!enemy clear`', inline: true },
-                { name: '📋 TAB', value: '`!tab` - Таблица игроков', inline: false }
+                { name: '📋 TAB', value: '`!tab` - Таблица игроков (изображение)', inline: false }
             )
             .setTimestamp();
         await message.reply({ embeds: [embed] });
     }
 });
 
-// --- ПИНГ ДЛЯ RENDER (чтобы не засыпал) ---
+// --- ПИНГ ДЛЯ RENDER ---
 setInterval(() => {
     if (bot && isConnected) {
         console.log('💓 Пинг для Render (бот жив)');
     }
-}, 30000); // Каждые 30 секунд
+}, 30000);
 
 // --- ЗАПУСК ---
 client.login(DISCORD_TOKEN).catch(err => {
