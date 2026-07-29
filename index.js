@@ -72,6 +72,8 @@ let isAuthorized = false;
 let hasJoinedMode = false;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
+let lastCommandTime = 0;
+const COMMAND_DELAY = 2000; // 2 секунды задержки между командами
 
 // --- ОТПРАВКА В DISCORD ---
 function sendDiscordMessage(content) {
@@ -79,6 +81,30 @@ function sendDiscordMessage(content) {
     const channel = client.channels.cache.get(DISCORD_CHANNEL_ID);
     if (channel) {
         channel.send(content).catch(err => console.error('Ошибка отправки в Discord:', err));
+    }
+}
+
+// --- ФУНКЦИЯ ДЛЯ ЗАДЕРЖКИ КОМАНД ---
+function sendCommandWithDelay(command) {
+    const now = Date.now();
+    const timeSinceLastCommand = now - lastCommandTime;
+    
+    if (timeSinceLastCommand < COMMAND_DELAY) {
+        const waitTime = COMMAND_DELAY - timeSinceLastCommand;
+        console.log(`⏳ Ждём ${waitTime}мс перед командой: ${command}`);
+        setTimeout(() => {
+            if (bot) {
+                bot.chat(command);
+                lastCommandTime = Date.now();
+                console.log(`✅ Отправлена команда: ${command}`);
+            }
+        }, waitTime);
+    } else {
+        if (bot) {
+            bot.chat(command);
+            lastCommandTime = Date.now();
+            console.log(`✅ Отправлена команда: ${command}`);
+        }
     }
 }
 
@@ -139,24 +165,21 @@ function getFriendGradient(index, total) {
     return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
-// --- ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ ТАБЛИЦЫ (С ВАШИМ ФОНОМ) ---
+// --- ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ ТАБЛИЦЫ ---
 async function generateTabImage() {
     if (!bot || !isConnected) return null;
     
     const players = getPlayers();
     if (players.length === 0) return null;
     
-    // Разделяем на категории
     const enemies = players.filter(p => p.isEnemy);
     const friends = players.filter(p => p.isFriend);
     const others = players.filter(p => !p.isEnemy && !p.isFriend);
     
-    // Сортируем по пингу
     enemies.sort((a, b) => a.ping - b.ping);
     friends.sort((a, b) => a.ping - b.ping);
     others.sort((a, b) => a.ping - b.ping);
     
-    // Формируем колонки по 20 игроков
     const allCols = [];
     const allHeaders = [];
     
@@ -185,7 +208,7 @@ async function generateTabImage() {
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
     
-    // --- ЗАГРУЗКА ВАШЕГО ФОНА ---
+    // --- ФОН ---
     let background = null;
     const bgPath = path.join(__dirname, 'images', 'bg.png');
     
@@ -194,19 +217,15 @@ async function generateTabImage() {
             background = await loadImage(bgPath);
             console.log('✅ Ваш фон загружен!');
         } else {
-            console.log('⚠️ Ваш фон не найден по пути:', bgPath);
-            console.log('   Использую тёмный фон по умолчанию');
+            console.log('⚠️ Ваш фон не найден');
         }
     } catch (err) {
         console.log('⚠️ Ошибка загрузки фона:', err.message);
     }
     
-    // --- РИСУЕМ ФОН ---
     if (background) {
-        // Растягиваем ваш фон на весь экран
         ctx.drawImage(background, 0, 0, width, height);
     } else {
-        // Запасной вариант — тёмный градиент (если нет вашего фона)
         const gradient = ctx.createLinearGradient(0, 0, width, height);
         gradient.addColorStop(0, '#0a0a1a');
         gradient.addColorStop(0.5, '#1a1a2e');
@@ -215,11 +234,10 @@ async function generateTabImage() {
         ctx.fillRect(0, 0, width, height);
     }
     
-    // --- ЛЁГКОЕ ЗАТЕМНЕНИЕ ДЛЯ ЧИТАЕМОСТИ ТЕКСТА ---
     ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
     ctx.fillRect(0, 0, width, height);
     
-    // --- ЗАГОЛОВОК (СТИЛЬ MINECRAFT) ---
+    // --- ЗАГОЛОВОК ---
     ctx.fillStyle = '#ffffff';
     ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
     ctx.shadowBlur = 20;
@@ -248,8 +266,6 @@ async function generateTabImage() {
     if (maxRows > 30) fontSize = 14;
     if (maxRows > 35) fontSize = 13;
     
-    const totalRows = Math.ceil(numCols / maxColsPerRow);
-    
     // --- РИСУЕМ КАЖДУЮ КОЛОНКУ ---
     allCols.forEach((col, index) => {
         const rowIndex = Math.floor(index / maxColsPerRow);
@@ -263,7 +279,6 @@ async function generateTabImage() {
         const colRows = col.length;
         const totalHeight = headerHeight + colRows * rowHeight + padding * 2;
         
-        // --- ФОН КОЛОНКИ (ПРОЗРАЧНЫЙ) ---
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
         ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
         ctx.shadowBlur = 15;
@@ -272,7 +287,6 @@ async function generateTabImage() {
         ctx.fill();
         ctx.shadowBlur = 0;
         
-        // --- ЗАГОЛОВОК КОЛОНКИ ---
         ctx.fillStyle = '#ffffff';
         ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
         ctx.shadowBlur = 8;
@@ -281,7 +295,6 @@ async function generateTabImage() {
         ctx.fillText(allHeaders[index], x + (colWidth - 6) / 2, y + 30);
         ctx.shadowBlur = 0;
         
-        // --- РАЗДЕЛИТЕЛЬ ---
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -289,16 +302,13 @@ async function generateTabImage() {
         ctx.lineTo(x + colWidth - 16, y + 38);
         ctx.stroke();
         
-        // --- СТРОКИ ---
         let yPos = y + headerHeight + padding;
         col.forEach((player, idx) => {
-            // Цвет имени
             let color;
             if (player.isFriend) color = '#66ff88';
             else if (player.isEnemy) color = '#ff6b6b';
             else color = '#c8d6e5';
             
-            // --- ИМЯ ---
             ctx.fillStyle = color;
             ctx.font = `${fontSize}px "Courier New", monospace`;
             ctx.textAlign = 'left';
@@ -322,7 +332,6 @@ async function generateTabImage() {
             ctx.fillText(nameToDisplay, x + 10, yPos + 8);
             ctx.shadowBlur = 0;
             
-            // --- ПИНГ ---
             ctx.fillStyle = '#8899bb';
             ctx.textAlign = 'right';
             ctx.font = `${fontSize - 2}px "Courier New", monospace`;
@@ -332,7 +341,6 @@ async function generateTabImage() {
         });
     });
     
-    // --- ФУТЕР ---
     ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
     ctx.font = '18px "Courier New", monospace';
     ctx.textAlign = 'center';
@@ -363,7 +371,7 @@ function connectMinecraft() {
             const msg = message.toString().toLowerCase();
             if (msg.includes('/register') || msg.includes('/login') || msg.includes('зарегистрируйтесь')) {
                 console.log('🔐 Отправка пароля...');
-                bot.chat(`/login ${SERVER_PASSWORD}`);
+                sendCommandWithDelay(`/login ${SERVER_PASSWORD}`);
                 isAuthorized = true;
             }
         });
@@ -376,8 +384,7 @@ function connectMinecraft() {
         if (!hasJoinedMode) {
             setTimeout(() => {
                 console.log(`🚀 Переход на режим kitpvp2...`);
-                bot.chat(`/kitpvp2`);
-                sendDiscordMessage(`🚀 Перехожу на режим **kitpvp2**...`);
+                sendCommandWithDelay(`/kitpvp2`);
                 hasJoinedMode = true;
                 
                 setTimeout(() => {
@@ -401,7 +408,7 @@ function connectMinecraft() {
     bot.on('death', () => {
         sendDiscordMessage(`💀 **${MINECRAFT_USERNAME}** погиб!`);
         setTimeout(() => {
-            if (bot) bot.chat('/spawn');
+            if (bot) sendCommandWithDelay('/spawn');
         }, 2000);
     });
 
@@ -489,7 +496,7 @@ client.on('messageCreate', async (message) => {
             return;
         }
         const mode = args[0] || 'kitpvp2';
-        bot.chat(`/${mode}`);
+        sendCommandWithDelay(`/${mode}`);
         hasJoinedMode = true;
         await message.reply(`🚀 Перехожу на **${mode}**...`);
     }
@@ -522,7 +529,7 @@ client.on('messageCreate', async (message) => {
             await message.reply('⚠️ Укажите текст: `!say Привет`');
             return;
         }
-        bot.chat(text);
+        sendCommandWithDelay(text);
         await message.reply(`💬 Отправлено: "${text}"`);
     }
 
