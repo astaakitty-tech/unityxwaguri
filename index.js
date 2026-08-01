@@ -52,9 +52,11 @@ function saveData() {
     }
 }
 
+// --- ЗАГРУЖАЕМ СОХРАНЁННЫЕ ДАННЫЕ ---
 let savedData = loadData();
 let friendList = savedData.friends || [];
 let enemyList = savedData.enemies || [];
+let onlinePlayers = [];
 
 // --- DISCORD КЛИЕНТ ---
 const client = new Client({
@@ -136,16 +138,14 @@ function removeFromList(list, name) {
     return false;
 }
 
-// --- ПОЛУЧЕНИЕ СПИСКА ИГРОКОВ (ДЛЯ ВНУТРЕННЕГО ИСПОЛЬЗОВАНИЯ) ---
+// --- ПОЛУЧЕНИЕ СПИСКА ИГРОКОВ ---
 function getPlayers() {
-    if (!bot || !isConnected) return [];
-    
     const players = [];
-    for (const [name, player] of Object.entries(bot.players)) {
-        if (name === bot.username) continue;
+    for (const name of onlinePlayers) {
+        if (name === bot?.username) continue;
         players.push({
             name: name,
-            ping: player.ping || 0,
+            ping: 0,
             isFriend: isInList(friendList, name),
             isEnemy: isInList(enemyList, name)
         });
@@ -165,11 +165,11 @@ function getFriendGradient(index, total) {
     return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
-// --- ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ ИЗ СПИСКА ИГРОКОВ ---
-async function generateTabImageFromList(players) {
-    if (!players || players.length === 0) return null;
+// --- ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ ---
+async function generateTabImage() {
+    const players = getPlayers();
+    if (players.length === 0) return null;
     
-    // Сортируем: враги → друзья → остальные
     players.sort((a, b) => {
         if (a.isEnemy && !b.isEnemy) return -1;
         if (!a.isEnemy && b.isEnemy) return 1;
@@ -241,7 +241,6 @@ async function generateTabImageFromList(players) {
     if (maxRows > 30) fontSize = 14;
     if (maxRows > 35) fontSize = 13;
     
-    // --- РИСУЕМ КОЛОНКИ ---
     for (let col = 0; col < cols; col++) {
         const x = startX + col * colWidth;
         const y = startY;
@@ -260,7 +259,6 @@ async function generateTabImageFromList(players) {
         ctx.fill();
         ctx.shadowBlur = 0;
         
-        // Заголовок колонки
         let headerText = '👤 Игроки';
         const hasEnemies = players.some(p => p.isEnemy);
         const hasFriends = players.some(p => p.isFriend);
@@ -356,6 +354,39 @@ function connectMinecraft() {
         auth: 'offline'
     });
 
+    bot.on('playerJoined', (player) => {
+        if (player.username === bot.username) return;
+        if (!onlinePlayers.includes(player.username)) {
+            onlinePlayers.push(player.username);
+            console.log(`👤 Игрок зашёл: ${player.username} (${onlinePlayers.length} игроков онлайн)`);
+        }
+    });
+
+    bot.on('playerLeft', (player) => {
+        const index = onlinePlayers.indexOf(player.username);
+        if (index !== -1) {
+            onlinePlayers.splice(index, 1);
+            console.log(`👤 Игрок вышел: ${player.username} (${onlinePlayers.length} игроков онлайн)`);
+        }
+    });
+
+    setInterval(() => {
+        if (!bot || !isConnected) return;
+        const currentPlayers = Object.keys(bot.players).filter(name => name !== bot.username);
+        for (const name of currentPlayers) {
+            if (!onlinePlayers.includes(name)) {
+                onlinePlayers.push(name);
+                console.log(`🔄 Добавлен игрок: ${name}`);
+            }
+        }
+        for (let i = onlinePlayers.length - 1; i >= 0; i--) {
+            if (!currentPlayers.includes(onlinePlayers[i])) {
+                console.log(`🔄 Игрок вышел: ${onlinePlayers[i]}`);
+                onlinePlayers.splice(i, 1);
+            }
+        }
+    }, 5000);
+
     if (SERVER_PASSWORD) {
         bot.on('message', (message) => {
             const msg = message.toString().toLowerCase();
@@ -370,6 +401,12 @@ function connectMinecraft() {
     bot.on('spawn', () => {
         console.log(`✅ Бот появился в мире!`);
         sendDiscordMessage(`✅ **${MINECRAFT_USERNAME}** появился на сервере!`);
+        
+        setTimeout(() => {
+            const players = Object.keys(bot.players);
+            onlinePlayers = players.filter(name => name !== bot.username);
+            console.log(`👥 Начальный список игроков: ${onlinePlayers.length} игроков`);
+        }, 3000);
         
         if (!hasJoinedMode) {
             setTimeout(() => {
@@ -444,6 +481,7 @@ function disconnectMinecraft() {
     bot.end('Отключение по команде Discord');
     isConnected = false;
     bot = null;
+    onlinePlayers = [];
     sendDiscordMessage('❌ Бот отключён');
 }
 
@@ -501,6 +539,7 @@ client.on('messageCreate', async (message) => {
                 { name: 'Имя', value: MINECRAFT_USERNAME, inline: true },
                 { name: 'Сервер', value: MINECRAFT_HOST, inline: true },
                 { name: '❤️ Здоровье', value: isConnected ? `${bot?.health || 0}/20` : '—', inline: true },
+                { name: '👥 Онлайн', value: onlinePlayers.length > 0 ? `${onlinePlayers.length} игроков` : '0 игроков', inline: true },
                 { name: '🤝 Друзья', value: friendList.length > 0 ? friendList.join(', ') : 'Никого', inline: false },
                 { name: '👿 Враги', value: enemyList.length > 0 ? enemyList.join(', ') : 'Никого', inline: false }
             )
@@ -535,8 +574,8 @@ client.on('messageCreate', async (message) => {
             return;
         }
         
-        const playerExists = Object.keys(bot.players).some(n => 
-            n.toLowerCase() === name.toLowerCase() && n !== bot.username
+        const playerExists = onlinePlayers.some(n => 
+            n.toLowerCase() === name.toLowerCase()
         );
         
         if (!playerExists) {
@@ -574,9 +613,7 @@ client.on('messageCreate', async (message) => {
         }
         let list = '🤝 **Друзья:**\n';
         friendList.forEach((n, i) => {
-            const player = bot?.players?.[n];
-            const ping = player?.ping || '?';
-            list += `${i+1}. **${n}** (${ping}ms)\n`;
+            list += `${i+1}. **${n}**\n`;
         });
         await message.reply(list);
     }
@@ -600,8 +637,8 @@ client.on('messageCreate', async (message) => {
             return;
         }
         
-        const playerExists = Object.keys(bot.players).some(n => 
-            n.toLowerCase() === name.toLowerCase() && n !== bot.username
+        const playerExists = onlinePlayers.some(n => 
+            n.toLowerCase() === name.toLowerCase()
         );
         
         if (!playerExists) {
@@ -639,9 +676,7 @@ client.on('messageCreate', async (message) => {
         }
         let list = '👿 **Враги:**\n';
         enemyList.forEach((n, i) => {
-            const player = bot?.players?.[n];
-            const ping = player?.ping || '?';
-            list += `${i+1}. **${n}** (${ping}ms)\n`;
+            list += `${i+1}. **${n}**\n`;
         });
         await message.reply(list);
     }
@@ -653,74 +688,33 @@ client.on('messageCreate', async (message) => {
         await message.reply('🗑️ Список врагов очищен.');
     }
 
-    // --- !tab --- (ИЗОБРАЖЕНИЕ ЧЕРЕЗ /list)
+    // --- !tab ---
     else if (command === 'tab' && !args[0]) {
         if (!isConnected || !bot) {
             await message.reply('❌ Бот не подключен!');
             return;
         }
         
-        await message.reply('📋 Запрашиваю список игроков...');
-        sendCommandWithDelay('/list');
-        
-        let responseReceived = false;
-        
-        const listHandler = async (msg) => {
-            const text = msg.toString();
+        try {
+            const imageBuffer = await generateTabImage();
+            if (!imageBuffer) {
+                await message.reply('📋 На сервере никого нет.');
+                return;
+            }
             
-            if (text.includes('players online') || text.includes('игроков онлайн') || text.includes('online:')) {
-                responseReceived = true;
-                
-                const cleaned = text.replace(/[^a-zA-Z0-9а-яА-Я_ ]/g, '').split(' ');
-                const names = cleaned.filter(word => 
-                    word.length > 1 && 
-                    !['players', 'online', 'игроков', 'онлайн', 'There', 'are', 'of', 'max', 'total'].includes(word.toLowerCase())
-                );
-                
-                if (names.length > 0) {
-                    // Формируем данные для изображения
-                    const playerData = names.map(name => ({
-                        name: name,
-                        ping: 0,
-                        isFriend: isInList(friendList, name),
-                        isEnemy: isInList(enemyList, name)
-                    }));
-                    
-                    try {
-                        const imageBuffer = await generateTabImageFromList(playerData);
-                        if (imageBuffer) {
-                            const channel = client.channels.cache.get(DISCORD_CHANNEL_ID);
-                            if (channel) {
-                                await channel.send({
-                                    files: [{
-                                        attachment: imageBuffer,
-                                        name: 'tab.png'
-                                    }]
-                                });
-                            }
-                        } else {
-                            await message.reply('❌ Ошибка при создании изображения.');
-                        }
-                    } catch (err) {
-                        console.error('❌ Ошибка генерации изображения:', err);
-                        await message.reply('❌ Ошибка при создании изображения.');
-                    }
-                } else {
-                    await message.reply(`📊 **Список игроков:**\n${text}`);
-                }
-                
-                bot.removeListener('message', listHandler);
+            const channel = client.channels.cache.get(DISCORD_CHANNEL_ID);
+            if (channel) {
+                await channel.send({
+                    files: [{
+                        attachment: imageBuffer,
+                        name: 'tab.png'
+                    }]
+                });
             }
-        };
-        
-        bot.on('message', listHandler);
-        
-        setTimeout(async () => {
-            if (!responseReceived) {
-                await message.reply('⚠️ Не удалось получить список игроков.');
-                bot.removeListener('message', listHandler);
-            }
-        }, 5000);
+        } catch (err) {
+            console.error('❌ Ошибка генерации изображения:', err);
+            await message.reply('❌ Ошибка при создании таблицы.');
+        }
     }
 
     // --- !help ---
@@ -732,7 +726,7 @@ client.on('messageCreate', async (message) => {
                 { name: '🎮 Управление', value: '`!connect` - Подключиться\n`!disconnect` - Отключиться\n`!join <режим>` - Зайти на режим\n`!status` - Статус\n`!say <текст>` - Отправить сообщение', inline: false },
                 { name: '🤝 Друзья', value: '`!friend add <ник>`\n`!friend remove <ник>`\n`!friend list`\n`!friend clear`', inline: true },
                 { name: '👿 Враги', value: '`!enemy add <ник>`\n`!enemy remove <ник>`\n`!enemy list`\n`!enemy clear`', inline: true },
-                { name: '📋 TAB', value: '`!tab` - Таблица игроков (изображение, безопасно)', inline: false }
+                { name: '📋 TAB', value: '`!tab` - Таблица игроков (изображение)', inline: false }
             )
             .setTimestamp();
         await message.reply({ embeds: [embed] });
