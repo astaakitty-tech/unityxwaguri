@@ -2,8 +2,16 @@ const mineflayer = require('mineflayer');
 const { pathfinder } = require('mineflayer-pathfinder');
 const fs = require('fs');
 const path = require('path');
-const { createCanvas } = require('canvas');
-const Discord = require('discord.js');
+
+// Проверяем наличие canvas
+let canvas;
+try {
+    canvas = require('canvas');
+    console.log('✅ Canvas загружен');
+} catch (error) {
+    console.log('⚠️ Canvas не найден, будет использован текстовый режим');
+    canvas = null;
+}
 
 // ============================================
 // КОНФИГУРАЦИЯ
@@ -14,13 +22,10 @@ const config = {
         port: 25565,
         version: '1.20.4',
         username: 'YourBotName',
-        auth: 'offline',
-        keepAlive: true,
-        checkTimeoutInterval: 30000,
-        reconnectDelay: 10000
+        auth: 'offline'
     },
     discord: {
-        enabled: true,
+        enabled: false, // Отключаем Discord для теста
         token: 'YOUR_DISCORD_BOT_TOKEN',
         channelId: 'YOUR_DISCORD_CHANNEL_ID'
     }
@@ -148,173 +153,202 @@ class PlayerRegistry {
 }
 
 // ============================================
-// СОЗДАНИЕ ИЗОБРАЖЕНИЯ
-// ============================================
-async function generatePlayerImage() {
-    const players = registry.getPlayersWithStatus();
-    
-    if (players.length === 0) {
-        return null;
-    }
-
-    const sortedPlayers = players.sort((a, b) => a.name.localeCompare(b.name));
-    const friends = sortedPlayers.filter(p => p.status === 'friend');
-    const enemies = sortedPlayers.filter(p => p.status === 'enemy');
-    const neutral = sortedPlayers.filter(p => p.status === 'neutral');
-
-    const width = 800;
-    const height = 500 + Math.max(0, Math.floor((players.length - 20) / 4) * 35);
-    const canvas = createCanvas(width, Math.min(height, 800));
-    const ctx = canvas.getContext('2d');
-
-    // Фон
-    const gradient = ctx.createLinearGradient(0, 0, width, 0);
-    gradient.addColorStop(0, '#1a1a2e');
-    gradient.addColorStop(0.5, '#16213e');
-    gradient.addColorStop(1, '#1a1a2e');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, width, canvas.height);
-
-    // Заголовок
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.fillStyle = '#ffd700';
-    ctx.font = 'bold 32px Arial';
-    ctx.shadowColor = 'rgba(255,215,0,0.3)';
-    ctx.shadowBlur = 10;
-    ctx.fillText('⚔️ KitPvP 2 Online', width / 2, 15);
-    ctx.shadowBlur = 0;
-
-    ctx.fillStyle = '#8888aa';
-    ctx.font = '14px Arial';
-    ctx.fillText(`MineBlaze • ${players.length} игроков онлайн`, width / 2, 60);
-
-    let yPos = 95;
-
-    function drawSection(title, emoji, items, color, bgColor, yStart) {
-        if (items.length === 0) return yStart;
-
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '18px Arial';
-        ctx.fillText(`${emoji} ${title} (${items.length})`, 25, yStart);
-
-        yStart += 30;
-
-        const cols = 4;
-        const itemWidth = 175;
-        const itemHeight = 28;
-        const padding = 5;
-
-        items.forEach((player, index) => {
-            const col = index % cols;
-            const row = Math.floor(index / cols);
-            const x = 25 + col * (itemWidth + padding);
-            const y = yStart + row * (itemHeight + padding);
-
-            ctx.fillStyle = bgColor;
-            ctx.shadowColor = color;
-            ctx.shadowBlur = 3;
-            ctx.beginPath();
-            ctx.roundRect(x, y, itemWidth, itemHeight, 5);
-            ctx.fill();
-            ctx.shadowBlur = 0;
-
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillStyle = color;
-            ctx.font = '13px Arial';
-            ctx.fillText(player.name, x + itemWidth / 2, y + itemHeight / 2);
-        });
-
-        return yStart + Math.ceil(items.length / cols) * (itemHeight + padding) + 15;
-    }
-
-    yPos = drawSection('Друзья', '🤝', friends, '#00ff88', 'rgba(0,255,136,0.1)', yPos);
-    yPos = drawSection('Враги', '👿', enemies, '#ff4444', 'rgba(255,68,68,0.1)', yPos);
-    yPos = drawSection('Игроки', '👤', neutral, '#aaaacc', 'rgba(255,255,255,0.05)', yPos);
-
-    // Статистика
-    const statsY = Math.min(canvas.height - 55, yPos + 20);
-    ctx.fillStyle = 'rgba(255,255,255,0.05)';
-    ctx.beginPath();
-    ctx.roundRect(25, statsY, width - 50, 35, 8);
-    ctx.fill();
-
-    const stats = [
-        { label: '🤝 Друзья', value: friends.length },
-        { label: '👿 Враги', value: enemies.length },
-        { label: '👤 Всего', value: players.length }
-    ];
-
-    stats.forEach((stat, index) => {
-        const x = width / 6 + (index * width / 3);
-        ctx.fillStyle = '#aaaacc';
-        ctx.font = '12px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(`${stat.label}:`, x - 25, statsY + 17);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 13px Arial';
-        ctx.fillText(stat.value, x + 25, statsY + 17);
-    });
-
-    // Футер
-    const footerY = canvas.height - 20;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#4a4a6a';
-    ctx.font = '11px Arial';
-    ctx.fillText(`🟢 Обновлено: ${new Date().toLocaleString()}`, width / 2, footerY);
-
-    const imagePath = path.join(__dirname, 'player_list.png');
-    const buffer = canvas.toBuffer('image/png');
-    fs.writeFileSync(imagePath, buffer);
-
-    return imagePath;
-}
-
-// Добавляем roundRect
-if (!CanvasRenderingContext2D.prototype.roundRect) {
-    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
-        if (r > w / 2) r = w / 2;
-        if (r > h / 2) r = h / 2;
-        this.moveTo(x + r, y);
-        this.lineTo(x + w - r, y);
-        this.quadraticCurveTo(x + w, y, x + w, y + r);
-        this.lineTo(x + w, y + h - r);
-        this.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-        this.lineTo(x + r, y + h);
-        this.quadraticCurveTo(x, y + h, x, y + h - r);
-        this.lineTo(x, y + r);
-        this.quadraticCurveTo(x, y, x + r, y);
-        this.closePath();
-        return this;
-    };
-}
-
-// ============================================
 // ИНИЦИАЛИЗАЦИЯ
 // ============================================
 const registry = new PlayerRegistry();
 registry.loadFromFile();
 
 let minecraftBot = null;
-let discordBot = null;
-let isConnecting = false;
 let commandQueue = [];
 let isProcessingQueue = false;
 let reconnectTimeout = null;
 let serverRestarting = false;
 
 // ============================================
+// ФУНКЦИЯ ДЛЯ СОЗДАНИЯ ИЗОБРАЖЕНИЯ (ЕСЛИ ЕСТЬ CANVAS)
+// ============================================
+function generatePlayerImage() {
+    // Если canvas не загружен, возвращаем null
+    if (!canvas) {
+        return null;
+    }
+
+    try {
+        const { createCanvas } = canvas;
+        const players = registry.getPlayersWithStatus();
+        
+        if (players.length === 0) {
+            return null;
+        }
+
+        const sortedPlayers = players.sort((a, b) => a.name.localeCompare(b.name));
+        const friends = sortedPlayers.filter(p => p.status === 'friend');
+        const enemies = sortedPlayers.filter(p => p.status === 'enemy');
+        const neutral = sortedPlayers.filter(p => p.status === 'neutral');
+
+        const width = 800;
+        const height = 500 + Math.max(0, Math.floor((players.length - 20) / 4) * 35);
+        const canvasObj = createCanvas(width, Math.min(height, 800));
+        const ctx = canvasObj.getContext('2d');
+
+        // Фон
+        const gradient = ctx.createLinearGradient(0, 0, width, 0);
+        gradient.addColorStop(0, '#1a1a2e');
+        gradient.addColorStop(0.5, '#16213e');
+        gradient.addColorStop(1, '#1a1a2e');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, canvasObj.height);
+
+        // Заголовок
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 32px Arial';
+        ctx.shadowColor = 'rgba(255,215,0,0.3)';
+        ctx.shadowBlur = 10;
+        ctx.fillText('⚔️ KitPvP 2 Online', width / 2, 15);
+        ctx.shadowBlur = 0;
+
+        ctx.fillStyle = '#8888aa';
+        ctx.font = '14px Arial';
+        ctx.fillText(`MineBlaze • ${players.length} игроков онлайн`, width / 2, 60);
+
+        let yPos = 95;
+
+        // Функция для отрисовки секции
+        function drawSection(title, emoji, items, color, bgColor, yStart) {
+            if (items.length === 0) return yStart;
+
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '18px Arial';
+            ctx.fillText(`${emoji} ${title} (${items.length})`, 25, yStart);
+
+            yStart += 30;
+
+            const cols = 4;
+            const itemWidth = 175;
+            const itemHeight = 28;
+            const padding = 5;
+
+            items.forEach((player, index) => {
+                const col = index % cols;
+                const row = Math.floor(index / cols);
+                const x = 25 + col * (itemWidth + padding);
+                const y = yStart + row * (itemHeight + padding);
+
+                ctx.fillStyle = bgColor;
+                ctx.shadowColor = color;
+                ctx.shadowBlur = 3;
+                ctx.beginPath();
+                // Вместо roundRect используем обычный rect
+                ctx.rect(x, y, itemWidth, itemHeight);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = color;
+                ctx.font = '13px Arial';
+                ctx.fillText(player.name, x + itemWidth / 2, y + itemHeight / 2);
+            });
+
+            return yStart + Math.ceil(items.length / cols) * (itemHeight + padding) + 15;
+        }
+
+        yPos = drawSection('Друзья', '🤝', friends, '#00ff88', 'rgba(0,255,136,0.1)', yPos);
+        yPos = drawSection('Враги', '👿', enemies, '#ff4444', 'rgba(255,68,68,0.1)', yPos);
+        yPos = drawSection('Игроки', '👤', neutral, '#aaaacc', 'rgba(255,255,255,0.05)', yPos);
+
+        // Статистика
+        const statsY = Math.min(canvasObj.height - 55, yPos + 20);
+        ctx.fillStyle = 'rgba(255,255,255,0.05)';
+        ctx.beginPath();
+        ctx.rect(25, statsY, width - 50, 35);
+        ctx.fill();
+
+        const stats = [
+            { label: '🤝 Друзья', value: friends.length },
+            { label: '👿 Враги', value: enemies.length },
+            { label: '👤 Всего', value: players.length }
+        ];
+
+        stats.forEach((stat, index) => {
+            const x = width / 6 + (index * width / 3);
+            ctx.fillStyle = '#aaaacc';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`${stat.label}:`, x - 25, statsY + 17);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 13px Arial';
+            ctx.fillText(stat.value, x + 25, statsY + 17);
+        });
+
+        // Футер
+        const footerY = canvasObj.height - 20;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#4a4a6a';
+        ctx.font = '11px Arial';
+        ctx.fillText(`🟢 Обновлено: ${new Date().toLocaleString()}`, width / 2, footerY);
+
+        const imagePath = path.join(__dirname, 'player_list.png');
+        const buffer = canvasObj.toBuffer('image/png');
+        fs.writeFileSync(imagePath, buffer);
+
+        return imagePath;
+    } catch (error) {
+        console.error('❌ Ошибка создания изображения:', error);
+        return null;
+    }
+}
+
+// ============================================
+// ФУНКЦИЯ ДЛЯ ТЕКСТОВОГО СПИСКА
+// ============================================
+function getPlayerListText() {
+    const players = registry.getPlayersWithStatus();
+    
+    if (players.length === 0) {
+        return "❌ Нет игроков онлайн";
+    }
+
+    const friends = players.filter(p => p.status === 'friend');
+    const enemies = players.filter(p => p.status === 'enemy');
+    const neutral = players.filter(p => p.status === 'neutral');
+
+    let text = '📋 Список игроков в KitPvP 2:\n';
+    text += `👥 Всего: ${players.length} игроков\n\n`;
+    
+    if (friends.length > 0) {
+        text += `🤝 Друзья (${friends.length}):\n`;
+        friends.forEach(p => { text += `  • ${p.name}\n`; });
+        text += '\n';
+    }
+    
+    if (enemies.length > 0) {
+        text += `👿 Враги (${enemies.length}):\n`;
+        enemies.forEach(p => { text += `  • ${p.name}\n`; });
+        text += '\n';
+    }
+    
+    if (neutral.length > 0) {
+        text += `👤 Игроки (${neutral.length}):\n`;
+        neutral.forEach(p => { text += `  • ${p.name}\n`; });
+        text += '\n';
+    }
+    
+    text += `🕐 Обновлено: ${new Date().toLocaleString()}`;
+    
+    return text;
+}
+
+// ============================================
 // MINECRAFT БОТ
 // ============================================
 function createMinecraftBot() {
-    if (isConnecting) return;
-    isConnecting = true;
-
     console.log(`🔄 Подключение к серверу...`);
 
     const bot = mineflayer.createBot({
@@ -328,12 +362,10 @@ function createMinecraftBot() {
         hideErrors: true
     });
 
-    let isLoggedIn = false;
+    bot.loadPlugin(pathfinder);
 
     bot.on('login', () => {
         console.log(`✅ Бот зашел на сервер!`);
-        isLoggedIn = true;
-        isConnecting = false;
         serverRestarting = false;
         
         if (reconnectTimeout) {
@@ -376,7 +408,6 @@ function createMinecraftBot() {
         // Проверка на ошибку подключения
         if (text.includes('Не удается подключиться на сервер')) {
             console.log('⚠️ Не удается подключиться к серверу');
-            isConnecting = false;
             if (reconnectTimeout) {
                 clearTimeout(reconnectTimeout);
             }
@@ -416,7 +447,6 @@ function createMinecraftBot() {
             console.error(`❌ Ошибка: ${err.message}`);
         }
         
-        isConnecting = false;
         if (!serverRestarting) {
             setTimeout(() => {
                 if (!minecraftBot || !minecraftBot._client || !minecraftBot._client.connected) {
@@ -429,8 +459,6 @@ function createMinecraftBot() {
 
     bot.on('end', (reason) => {
         console.log(`🔌 Бот отключен: ${reason || 'неизвестная причина'}`);
-        isLoggedIn = false;
-        isConnecting = false;
 
         if (reason && reason.includes('keepAlive')) {
             console.log('⚠️ Ошибка keepAlive, переподключение...');
@@ -443,7 +471,7 @@ function createMinecraftBot() {
             reconnectTimeout = setTimeout(() => {
                 console.log('🔄 Переподключение...');
                 createMinecraftBot();
-            }, config.minecraft.reconnectDelay);
+            }, 10000);
         }
     });
 
@@ -493,7 +521,7 @@ function processCommandQueue() {
 
         setTimeout(() => {
             sendNext();
-        }, 10000); // Задержка 10 секунд между командами
+        }, 10000);
     }
 
     sendNext();
@@ -519,174 +547,130 @@ function parseTabList(message) {
 }
 
 // ============================================
-// DISCORD БОТ
+// ЗАПУСК ТОЛЬКО MINECRAFT БОТА
 // ============================================
-async function startDiscordBot() {
-    if (!config.discord.enabled) {
-        console.log('ℹ️ Discord бот отключен');
-        return null;
-    }
-
-    if (!config.discord.token || config.discord.token === 'YOUR_DISCORD_BOT_TOKEN') {
-        console.log('⚠️ Токен Discord не настроен');
-        return null;
-    }
-
-    try {
-        discordBot = new Discord.Client({
-            intents: [
-                Discord.GatewayIntentBits.Guilds,
-                Discord.GatewayIntentBits.GuildMessages,
-                Discord.GatewayIntentBits.MessageContent
-            ]
-        });
-
-        discordBot.on('ready', () => {
-            console.log(`✅ Discord бот запущен как ${discordBot.user.tag}`);
-        });
-
-        discordBot.on('messageCreate', async (message) => {
-            if (message.author.bot) return;
-            if (message.channelId !== config.discord.channelId) return;
-
-            const content = message.content.trim();
-            
-            // #tab - показать список игроков
-            if (content === '#tab') {
-                await message.reply('🔄 Получение списка игроков...');
-                
-                try {
-                    if (minecraftBot && minecraftBot._client && minecraftBot._client.connected) {
-                        // Отправляем команду /tab с задержкой
-                        sendCommand('/tab');
-                        await new Promise(resolve => setTimeout(resolve, 5000));
-                    }
-                    
-                    // Генерируем изображение
-                    const imagePath = await generatePlayerImage();
-                    
-                    if (imagePath && fs.existsSync(imagePath)) {
-                        await message.channel.send({
-                            content: '📋 **Список игроков в KitPvP 2:**',
-                            files: [imagePath]
-                        });
-                        fs.unlinkSync(imagePath);
-                    } else {
-                        // Текстовый вариант
-                        const players = registry.getPlayers();
-                        if (players.length > 0) {
-                            const list = players.map(p => {
-                                const status = registry.getPlayerStatus(p.name);
-                                const emoji = status === 'friend' ? '🤝' : status === 'enemy' ? '👿' : '👤';
-                                return `${emoji} ${p.name}`;
-                            }).join('\n');
-                            await message.channel.send(`📋 **Список игроков:**\n${list}`);
-                        } else {
-                            await message.channel.send('❌ Нет игроков онлайн');
-                        }
-                    }
-                } catch (error) {
-                    console.error('❌ Ошибка:', error);
-                    await message.channel.send('❌ Произошла ошибка');
-                }
-            }
-            
-            // #connect - подключиться к серверу
-            if (content === '#connect') {
-                if (minecraftBot && minecraftBot._client && minecraftBot._client.connected) {
-                    await message.reply('✅ Бот уже подключен к серверу');
-                } else {
-                    await message.reply('🔄 Подключение к серверу...');
-                    if (reconnectTimeout) {
-                        clearTimeout(reconnectTimeout);
-                        reconnectTimeout = null;
-                    }
-                    createMinecraftBot();
-                }
-            }
-            
-            // #disconnect - отключиться от сервера
-            if (content === '#disconnect') {
-                if (minecraftBot) {
-                    await message.reply('🔌 Отключение от сервера...');
-                    minecraftBot.end();
-                    minecraftBot = null;
-                    commandQueue = [];
-                    isProcessingQueue = false;
-                } else {
-                    await message.reply('❌ Бот уже отключен');
-                }
-            }
-            
-            // #botenemy [имя] - добавить врага
-            if (content.startsWith('#botenemy ')) {
-                const name = content.slice(10).trim();
-                if (name) {
-                    registry.addEnemy(name);
-                    await message.reply(`👿 **${name}** добавлен во враги!`);
-                }
-            }
-            
-            // #help - помощь
-            if (content === '#help') {
-                await message.reply(
-                    '📖 **Доступные команды:**\n' +
-                    '`#tab` - показать список игроков\n' +
-                    '`#connect` - подключиться к серверу\n' +
-                    '`#disconnect` - отключиться от сервера\n' +
-                    '`#botenemy [имя]` - добавить врага\n' +
-                    '`#help` - показать это сообщение'
-                );
-            }
-        });
-
-        await discordBot.login(config.discord.token);
-        return discordBot;
-        
-    } catch (error) {
-        console.error('❌ Ошибка запуска Discord бота:', error.message);
-        return null;
-    }
-}
-
-// ============================================
-// ЗАПУСК
-// ============================================
-async function startBots() {
-    console.log('🚀 Запуск ботов...');
+function startBot() {
+    console.log('🚀 Запуск бота...');
     console.log('=================================');
-    
-    // Запускаем Discord бота
-    await startDiscordBot();
-    
-    console.log('=================================');
-    
-    // Запускаем Minecraft бота
-    minecraftBot = createMinecraftBot();
-    
-    console.log('=================================');
-    console.log('✅ Бот готов к работе!');
     console.log(`📝 Имя бота: ${config.minecraft.username}`);
     console.log(`🌐 Сервер: ${config.minecraft.host}:${config.minecraft.port}`);
     console.log('=================================');
-    console.log('📖 Доступные команды Discord: #help');
+    
+    minecraftBot = createMinecraftBot();
+    
+    console.log('✅ Бот запущен!');
+    console.log('📖 Команды в чате: !bot help');
 }
 
-// Обработка ошибок
+// ============================================
+// КОМАНДЫ ДЛЯ MINECRAFT ЧАТА
+// ============================================
+// Обработка команд из чата добавлена в bot.on('chat')
+
+// Переопределяем обработку chat для добавления команд
+const originalCreateBot = createMinecraftBot;
+createMinecraftBot = function() {
+    const bot = originalCreateBot.call(this);
+    
+    // Добавляем обработчик команд
+    bot.on('chat', (username, message) => {
+        if (username === bot.username) return;
+        
+        if (message.startsWith('!bot')) {
+            const args = message.split(' ');
+            const command = args[1];
+            
+            switch(command) {
+                case 'friend':
+                    const friendName = args[2];
+                    if (friendName) {
+                        registry.addFriend(friendName);
+                        bot.chat(`/friend add ${friendName}`);
+                        console.log(`🤝 Добавлен друг: ${friendName}`);
+                        bot.chat(`✅ ${friendName} добавлен в друзья!`);
+                    }
+                    break;
+                    
+                case 'enemy':
+                    const enemyName = args[2];
+                    if (enemyName) {
+                        registry.addEnemy(enemyName);
+                        console.log(`👿 Добавлен враг: ${enemyName}`);
+                        bot.chat(`👿 ${enemyName} добавлен во враги!`);
+                    }
+                    break;
+
+                case 'removefriend':
+                    const removeFriendName = args[2];
+                    if (removeFriendName) {
+                        registry.removeFriend(removeFriendName);
+                        console.log(`❌ Удален друг: ${removeFriendName}`);
+                        bot.chat(`❌ ${removeFriendName} удален из друзей!`);
+                    }
+                    break;
+
+                case 'removeenemy':
+                    const removeEnemyName = args[2];
+                    if (removeEnemyName) {
+                        registry.removeEnemy(removeEnemyName);
+                        console.log(`❌ Удален враг: ${removeEnemyName}`);
+                        bot.chat(`❌ ${removeEnemyName} удален из врагов!`);
+                    }
+                    break;
+                    
+                case 'list':
+                    const friends = registry.getFriends();
+                    const enemies = registry.getEnemies();
+                    bot.chat(`Друзья (${friends.length}): ${friends.join(', ') || 'нет'}`);
+                    bot.chat(`Враги (${enemies.length}): ${enemies.join(', ') || 'нет'}`);
+                    break;
+
+                case 'online':
+                    const players = registry.getPlayers();
+                    if (players.length > 0) {
+                        bot.chat(`👥 Онлайн (${players.length}): ${players.map(p => p.name).join(', ')}`);
+                    } else {
+                        bot.chat('❌ Нет игроков онлайн');
+                    }
+                    break;
+
+                case 'tab':
+                    bot.chat('/tab');
+                    break;
+
+                case 'help':
+                    bot.chat('📖 Доступные команды:');
+                    bot.chat('!bot friend [имя] - добавить друга');
+                    bot.chat('!bot enemy [имя] - добавить врага');
+                    bot.chat('!bot removefriend [имя] - удалить друга');
+                    bot.chat('!bot removeenemy [имя] - удалить врага');
+                    bot.chat('!bot list - список друзей/врагов');
+                    bot.chat('!bot online - список онлайн');
+                    bot.chat('!bot tab - обновить список');
+                    break;
+            }
+        }
+    });
+    
+    return bot;
+};
+
+// ============================================
+// ОБРАБОТКА ОШИБОК
+// ============================================
 process.on('unhandledRejection', (error) => {
     console.error('❌ Необработанная ошибка:', error);
 });
 
 process.on('SIGINT', () => {
-    console.log('\n🛑 Остановка ботов...');
+    console.log('\n🛑 Остановка бота...');
     if (minecraftBot) {
         minecraftBot.end();
-    }
-    if (discordBot) {
-        discordBot.destroy();
     }
     process.exit(0);
 });
 
-// Запуск
-startBots();
+// ============================================
+// ЗАПУСК
+// ============================================
+startBot();
