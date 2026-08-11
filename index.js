@@ -21,16 +21,16 @@ try {
 // ============================================
 const config = {
     minecraft: {
-        host: 'play.mineblaze.com',
-        port: 25565,
-        version: '1.20.4',
-        username: 'YourBotName', // ИЗМЕНИТЕ ЭТО!
-        auth: 'offline'
+        host: process.env.MC_HOST || 'play.mineblaze.com',
+        port: parseInt(process.env.MC_PORT) || 25565,
+        version: process.env.MC_VERSION || '1.20.4',
+        username: process.env.MC_USERNAME || 'YourBotName',
+        auth: process.env.MC_AUTH || 'offline'
     },
     discord: {
-        enabled: true, // ВКЛЮЧИТЕ DISCORD
-        token: 'YOUR_DISCORD_BOT_TOKEN', // ВСТАВЬТЕ ТОКЕН
-        channelId: 'YOUR_DISCORD_CHANNEL_ID' // ВСТАВЬТЕ ID КАНАЛА
+        enabled: process.env.DISCORD_ENABLED === 'true',
+        token: process.env.DISCORD_TOKEN || 'YOUR_DISCORD_BOT_TOKEN',
+        channelId: process.env.DISCORD_CHANNEL_ID || 'YOUR_DISCORD_CHANNEL_ID'
     }
 };
 
@@ -172,9 +172,7 @@ let serverRestarting = false;
 // ФУНКЦИЯ ДЛЯ ГЕНЕРАЦИИ ИЗОБРАЖЕНИЯ
 // ============================================
 function generatePlayerImage() {
-    // Если canvas не загружен, возвращаем null
     if (!canvas) {
-        console.log('ℹ️ Canvas недоступен, пропускаем генерацию изображения');
         return null;
     }
 
@@ -191,7 +189,6 @@ function generatePlayerImage() {
         const enemies = sortedPlayers.filter(p => p.status === 'enemy');
         const neutral = sortedPlayers.filter(p => p.status === 'neutral');
 
-        // Рассчитываем высоту
         const baseHeight = 500;
         const playerCount = players.length;
         const extraRows = Math.max(0, Math.floor((playerCount - 20) / 4));
@@ -201,7 +198,7 @@ function generatePlayerImage() {
         const canvasObj = createCanvas(width, height);
         const ctx = canvasObj.getContext('2d');
 
-        // Фон с градиентом
+        // Фон
         const gradient = ctx.createLinearGradient(0, 0, width, 0);
         gradient.addColorStop(0, '#1a1a2e');
         gradient.addColorStop(0.5, '#16213e');
@@ -225,7 +222,6 @@ function generatePlayerImage() {
 
         let yPos = 95;
 
-        // Функция для отрисовки секции
         function drawSection(title, emoji, items, color, bgColor, yStart) {
             if (items.length === 0) return yStart;
 
@@ -248,12 +244,10 @@ function generatePlayerImage() {
                 const x = 25 + col * (itemWidth + padding);
                 const y = yStart + row * (itemHeight + padding);
 
-                // Фон игрока
                 ctx.fillStyle = bgColor;
                 ctx.shadowColor = color;
                 ctx.shadowBlur = 3;
                 ctx.beginPath();
-                // Используем roundRect если доступен, иначе обычный rect
                 if (ctx.roundRect) {
                     ctx.roundRect(x, y, itemWidth, itemHeight, 5);
                 } else {
@@ -262,7 +256,6 @@ function generatePlayerImage() {
                 ctx.fill();
                 ctx.shadowBlur = 0;
 
-                // Имя игрока
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.fillStyle = color;
@@ -277,7 +270,6 @@ function generatePlayerImage() {
         yPos = drawSection('Враги', '👿', enemies, '#ff4444', 'rgba(255,68,68,0.1)', yPos);
         yPos = drawSection('Игроки', '👤', neutral, '#aaaacc', 'rgba(255,255,255,0.05)', yPos);
 
-        // Статистика
         const statsY = Math.min(height - 55, yPos + 20);
         ctx.fillStyle = 'rgba(255,255,255,0.05)';
         ctx.beginPath();
@@ -306,7 +298,6 @@ function generatePlayerImage() {
             ctx.fillText(stat.value, x + 25, statsY + 17);
         });
 
-        // Футер
         const footerY = height - 20;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -318,7 +309,6 @@ function generatePlayerImage() {
         const buffer = canvasObj.toBuffer('image/png');
         fs.writeFileSync(imagePath, buffer);
 
-        console.log('✅ Изображение создано');
         return imagePath;
     } catch (error) {
         console.error('❌ Ошибка создания изображения:', error.message);
@@ -327,7 +317,7 @@ function generatePlayerImage() {
 }
 
 // ============================================
-// ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ СПИСКА В ТЕКСТОВОМ ВИДЕ
+// ФУНКЦИЯ ДЛЯ ТЕКСТОВОГО СПИСКА
 // ============================================
 function getPlayerListText() {
     const players = registry.getPlayersWithStatus();
@@ -646,9 +636,6 @@ async function startDiscordBot() {
 
     if (!config.discord.token || config.discord.token === 'YOUR_DISCORD_BOT_TOKEN') {
         console.log('⚠️ Токен Discord не настроен!');
-        console.log('💡 Для включения Discord бота:');
-        console.log('   1. Получите токен на https://discord.com/developers/applications');
-        console.log('   2. Вставьте токен в config.discord.token');
         return null;
     }
 
@@ -671,7 +658,6 @@ async function startDiscordBot() {
 
             const content = message.content.trim();
             
-            // #tab - показать список игроков
             if (content === '#tab') {
                 await message.reply('🔄 Получение списка игроков...');
                 
@@ -681,7 +667,6 @@ async function startDiscordBot() {
                         await new Promise(resolve => setTimeout(resolve, 5000));
                     }
                     
-                    // Пробуем создать изображение
                     let imagePath = null;
                     if (canvas) {
                         imagePath = generatePlayerImage();
@@ -694,7 +679,6 @@ async function startDiscordBot() {
                         });
                         fs.unlinkSync(imagePath);
                     } else {
-                        // Используем текстовый вариант
                         const textList = getPlayerListText();
                         if (textList.length > 2000) {
                             const parts = textList.match(/.{1,1900}/g) || [];
@@ -707,13 +691,11 @@ async function startDiscordBot() {
                     }
                 } catch (error) {
                     console.error('❌ Ошибка:', error);
-                    // Отправляем текст в случае ошибки
                     const textList = getPlayerListText();
                     await message.channel.send(textList);
                 }
             }
             
-            // #connect - подключиться к серверу
             if (content === '#connect') {
                 if (minecraftBot && minecraftBot._client && minecraftBot._client.connected) {
                     await message.reply('✅ Бот уже подключен к серверу');
@@ -728,7 +710,6 @@ async function startDiscordBot() {
                 }
             }
             
-            // #disconnect - отключиться от сервера
             if (content === '#disconnect') {
                 if (minecraftBot) {
                     await message.reply('🔌 Отключение от сервера...');
@@ -745,7 +726,6 @@ async function startDiscordBot() {
                 }
             }
             
-            // #botenemy [имя] - добавить врага
             if (content.startsWith('#botenemy ')) {
                 const name = content.slice(10).trim();
                 if (name) {
@@ -754,7 +734,6 @@ async function startDiscordBot() {
                 }
             }
             
-            // #botfriend [имя] - добавить друга
             if (content.startsWith('#botfriend ')) {
                 const name = content.slice(11).trim();
                 if (name) {
@@ -766,7 +745,6 @@ async function startDiscordBot() {
                 }
             }
             
-            // #removeenemy [имя] - удалить врага
             if (content.startsWith('#removeenemy ')) {
                 const name = content.slice(13).trim();
                 if (name) {
@@ -775,7 +753,6 @@ async function startDiscordBot() {
                 }
             }
             
-            // #removefriend [имя] - удалить друга
             if (content.startsWith('#removefriend ')) {
                 const name = content.slice(14).trim();
                 if (name) {
@@ -784,7 +761,6 @@ async function startDiscordBot() {
                 }
             }
             
-            // #help - помощь
             if (content === '#help') {
                 await message.reply(
                     '📖 **Доступные команды:**\n' +
@@ -806,9 +782,6 @@ async function startDiscordBot() {
         
     } catch (error) {
         console.error('❌ Ошибка запуска Discord бота:', error.message);
-        if (error.code === 'TokenInvalid') {
-            console.log('💡 Неверный токен! Проверьте config.discord.token');
-        }
         return null;
     }
 }
@@ -820,12 +793,10 @@ async function startBots() {
     console.log('🚀 Запуск ботов...');
     console.log('=================================');
     
-    // Запускаем Discord бота
     await startDiscordBot();
     
     console.log('=================================');
     
-    // Запускаем Minecraft бота
     minecraftBot = createMinecraftBot();
     
     console.log('=================================');
@@ -835,15 +806,12 @@ async function startBots() {
     if (config.discord.enabled && discordBot) {
         console.log(`📝 Discord бот: ${discordBot.user?.tag || 'активен'}`);
     }
-    console.log('📦 Canvas: ${canvas ? "✅ Доступен" : "❌ Недоступен (будет использован текст)"}');
+    console.log(`📦 Canvas: ${canvas ? "✅ Доступен" : "❌ Недоступен (будет использован текст)"}`);
     console.log('=================================');
     console.log('📖 Команды Discord: #help');
     console.log('📖 Команды Minecraft: !bot help');
 }
 
-// ============================================
-// ОБРАБОТКА ОШИБОК
-// ============================================
 process.on('unhandledRejection', (error) => {
     console.error('❌ Необработанная ошибка:', error);
 });
@@ -859,7 +827,4 @@ process.on('SIGINT', () => {
     process.exit(0);
 });
 
-// ============================================
-// ЗАПУСК
-// ============================================
 startBots();
