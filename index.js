@@ -1,13 +1,16 @@
 const mineflayer = require('mineflayer');
 const { pathfinder } = require('mineflayer-pathfinder');
+const Discord = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
-// Проверяем наличие canvas
+// ============================================
+// ПРОВЕРКА И ЗАГРУЗКА CANVAS
+// ============================================
 let canvas;
 try {
     canvas = require('canvas');
-    console.log('✅ Canvas загружен');
+    console.log('✅ Canvas загружен успешно');
 } catch (error) {
     console.log('⚠️ Canvas не найден, будет использован текстовый режим');
     canvas = null;
@@ -21,13 +24,13 @@ const config = {
         host: 'play.mineblaze.com',
         port: 25565,
         version: '1.20.4',
-        username: 'YourBotName',
+        username: 'YourBotName', // ИЗМЕНИТЕ ЭТО!
         auth: 'offline'
     },
     discord: {
-        enabled: false, // Отключаем Discord для теста
-        token: 'YOUR_DISCORD_BOT_TOKEN',
-        channelId: 'YOUR_DISCORD_CHANNEL_ID'
+        enabled: true, // ВКЛЮЧИТЕ DISCORD
+        token: 'YOUR_DISCORD_BOT_TOKEN', // ВСТАВЬТЕ ТОКЕН
+        channelId: 'YOUR_DISCORD_CHANNEL_ID' // ВСТАВЬТЕ ID КАНАЛА
     }
 };
 
@@ -159,17 +162,19 @@ const registry = new PlayerRegistry();
 registry.loadFromFile();
 
 let minecraftBot = null;
+let discordBot = null;
 let commandQueue = [];
 let isProcessingQueue = false;
 let reconnectTimeout = null;
 let serverRestarting = false;
 
 // ============================================
-// ФУНКЦИЯ ДЛЯ СОЗДАНИЯ ИЗОБРАЖЕНИЯ (ЕСЛИ ЕСТЬ CANVAS)
+// ФУНКЦИЯ ДЛЯ ГЕНЕРАЦИИ ИЗОБРАЖЕНИЯ
 // ============================================
 function generatePlayerImage() {
     // Если canvas не загружен, возвращаем null
     if (!canvas) {
+        console.log('ℹ️ Canvas недоступен, пропускаем генерацию изображения');
         return null;
     }
 
@@ -186,18 +191,23 @@ function generatePlayerImage() {
         const enemies = sortedPlayers.filter(p => p.status === 'enemy');
         const neutral = sortedPlayers.filter(p => p.status === 'neutral');
 
+        // Рассчитываем высоту
+        const baseHeight = 500;
+        const playerCount = players.length;
+        const extraRows = Math.max(0, Math.floor((playerCount - 20) / 4));
+        const height = Math.min(baseHeight + extraRows * 35, 900);
+
         const width = 800;
-        const height = 500 + Math.max(0, Math.floor((players.length - 20) / 4) * 35);
-        const canvasObj = createCanvas(width, Math.min(height, 800));
+        const canvasObj = createCanvas(width, height);
         const ctx = canvasObj.getContext('2d');
 
-        // Фон
+        // Фон с градиентом
         const gradient = ctx.createLinearGradient(0, 0, width, 0);
         gradient.addColorStop(0, '#1a1a2e');
         gradient.addColorStop(0.5, '#16213e');
         gradient.addColorStop(1, '#1a1a2e');
         ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, width, canvasObj.height);
+        ctx.fillRect(0, 0, width, height);
 
         // Заголовок
         ctx.textAlign = 'center';
@@ -238,15 +248,21 @@ function generatePlayerImage() {
                 const x = 25 + col * (itemWidth + padding);
                 const y = yStart + row * (itemHeight + padding);
 
+                // Фон игрока
                 ctx.fillStyle = bgColor;
                 ctx.shadowColor = color;
                 ctx.shadowBlur = 3;
                 ctx.beginPath();
-                // Вместо roundRect используем обычный rect
-                ctx.rect(x, y, itemWidth, itemHeight);
+                // Используем roundRect если доступен, иначе обычный rect
+                if (ctx.roundRect) {
+                    ctx.roundRect(x, y, itemWidth, itemHeight, 5);
+                } else {
+                    ctx.rect(x, y, itemWidth, itemHeight);
+                }
                 ctx.fill();
                 ctx.shadowBlur = 0;
 
+                // Имя игрока
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.fillStyle = color;
@@ -262,10 +278,14 @@ function generatePlayerImage() {
         yPos = drawSection('Игроки', '👤', neutral, '#aaaacc', 'rgba(255,255,255,0.05)', yPos);
 
         // Статистика
-        const statsY = Math.min(canvasObj.height - 55, yPos + 20);
+        const statsY = Math.min(height - 55, yPos + 20);
         ctx.fillStyle = 'rgba(255,255,255,0.05)';
         ctx.beginPath();
-        ctx.rect(25, statsY, width - 50, 35);
+        if (ctx.roundRect) {
+            ctx.roundRect(25, statsY, width - 50, 35, 8);
+        } else {
+            ctx.rect(25, statsY, width - 50, 35);
+        }
         ctx.fill();
 
         const stats = [
@@ -287,7 +307,7 @@ function generatePlayerImage() {
         });
 
         // Футер
-        const footerY = canvasObj.height - 20;
+        const footerY = height - 20;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = '#4a4a6a';
@@ -298,15 +318,16 @@ function generatePlayerImage() {
         const buffer = canvasObj.toBuffer('image/png');
         fs.writeFileSync(imagePath, buffer);
 
+        console.log('✅ Изображение создано');
         return imagePath;
     } catch (error) {
-        console.error('❌ Ошибка создания изображения:', error);
+        console.error('❌ Ошибка создания изображения:', error.message);
         return null;
     }
 }
 
 // ============================================
-// ФУНКЦИЯ ДЛЯ ТЕКСТОВОГО СПИСКА
+// ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ СПИСКА В ТЕКСТОВОМ ВИДЕ
 // ============================================
 function getPlayerListText() {
     const players = registry.getPlayersWithStatus();
@@ -319,23 +340,23 @@ function getPlayerListText() {
     const enemies = players.filter(p => p.status === 'enemy');
     const neutral = players.filter(p => p.status === 'neutral');
 
-    let text = '📋 Список игроков в KitPvP 2:\n';
+    let text = '📋 **Список игроков в KitPvP 2:**\n';
     text += `👥 Всего: ${players.length} игроков\n\n`;
     
     if (friends.length > 0) {
-        text += `🤝 Друзья (${friends.length}):\n`;
+        text += `🤝 **Друзья** (${friends.length}):\n`;
         friends.forEach(p => { text += `  • ${p.name}\n`; });
         text += '\n';
     }
     
     if (enemies.length > 0) {
-        text += `👿 Враги (${enemies.length}):\n`;
+        text += `👿 **Враги** (${enemies.length}):\n`;
         enemies.forEach(p => { text += `  • ${p.name}\n`; });
         text += '\n';
     }
     
     if (neutral.length > 0) {
-        text += `👤 Игроки (${neutral.length}):\n`;
+        text += `👤 **Игроки** (${neutral.length}):\n`;
         neutral.forEach(p => { text += `  • ${p.name}\n`; });
         text += '\n';
     }
@@ -349,7 +370,7 @@ function getPlayerListText() {
 // MINECRAFT БОТ
 // ============================================
 function createMinecraftBot() {
-    console.log(`🔄 Подключение к серверу...`);
+    console.log(`🔄 Подключение к серверу ${config.minecraft.host}:${config.minecraft.port}...`);
 
     const bot = mineflayer.createBot({
         host: config.minecraft.host,
@@ -373,7 +394,6 @@ function createMinecraftBot() {
             reconnectTimeout = null;
         }
 
-        // Отправляем команду /kp2 с задержкой
         setTimeout(() => {
             sendCommand('/kp2');
         }, 2000);
@@ -387,7 +407,6 @@ function createMinecraftBot() {
         const text = message.toString();
         console.log(`📨 [Сервер] ${text}`);
 
-        // Проверка на перезагрузку сервера
         if (text.includes('Сервер перезагружается....')) {
             console.log('⚠️ Сервер перезагружается!');
             serverRestarting = true;
@@ -405,7 +424,6 @@ function createMinecraftBot() {
             }, 15000);
         }
 
-        // Проверка на ошибку подключения
         if (text.includes('Не удается подключиться на сервер')) {
             console.log('⚠️ Не удается подключиться к серверу');
             if (reconnectTimeout) {
@@ -417,7 +435,6 @@ function createMinecraftBot() {
             }, 15000);
         }
 
-        // Парсинг списка игроков
         if (text.includes('Список игроков') || text.includes('Online:')) {
             parseTabList(text);
         }
@@ -475,104 +492,6 @@ function createMinecraftBot() {
         }
     });
 
-    // Отправка команд из очереди
-    bot.on('spawn', () => {
-        setTimeout(() => {
-            processCommandQueue();
-        }, 5000);
-    });
-
-    return bot;
-}
-
-// ============================================
-// ОЧЕРЕДЬ КОМАНД
-// ============================================
-function sendCommand(command) {
-    if (!minecraftBot || !minecraftBot._client || !minecraftBot._client.connected) {
-        console.log(`⏳ Команда "${command}" будет отправлена после подключения`);
-        commandQueue.push(command);
-        return;
-    }
-
-    console.log(`📝 Отправка команды: ${command}`);
-    commandQueue.push(command);
-    processCommandQueue();
-}
-
-function processCommandQueue() {
-    if (isProcessingQueue || commandQueue.length === 0) return;
-    if (!minecraftBot || !minecraftBot._client || !minecraftBot._client.connected) {
-        console.log('⏳ Ожидание подключения для отправки команд...');
-        return;
-    }
-
-    isProcessingQueue = true;
-
-    function sendNext() {
-        if (commandQueue.length === 0) {
-            isProcessingQueue = false;
-            return;
-        }
-
-        const command = commandQueue.shift();
-        console.log(`📝 Отправка: ${command}`);
-        minecraftBot.chat(command);
-
-        setTimeout(() => {
-            sendNext();
-        }, 10000);
-    }
-
-    sendNext();
-}
-
-// ============================================
-// ПАРСИНГ TABLIST
-// ============================================
-function parseTabList(message) {
-    const playerPattern = /[a-zA-Z0-9_]{3,16}/g;
-    const players = message.match(playerPattern);
-    
-    if (players) {
-        registry.clearPlayers();
-        players.forEach(name => {
-            if (name.length >= 3 && name.length <= 16) {
-                registry.addPlayer(name);
-            }
-        });
-        registry.lastUpdate = new Date();
-        console.log(`👥 Обновлен список: ${registry.getPlayers().length} игроков`);
-    }
-}
-
-// ============================================
-// ЗАПУСК ТОЛЬКО MINECRAFT БОТА
-// ============================================
-function startBot() {
-    console.log('🚀 Запуск бота...');
-    console.log('=================================');
-    console.log(`📝 Имя бота: ${config.minecraft.username}`);
-    console.log(`🌐 Сервер: ${config.minecraft.host}:${config.minecraft.port}`);
-    console.log('=================================');
-    
-    minecraftBot = createMinecraftBot();
-    
-    console.log('✅ Бот запущен!');
-    console.log('📖 Команды в чате: !bot help');
-}
-
-// ============================================
-// КОМАНДЫ ДЛЯ MINECRAFT ЧАТА
-// ============================================
-// Обработка команд из чата добавлена в bot.on('chat')
-
-// Переопределяем обработку chat для добавления команд
-const originalCreateBot = createMinecraftBot;
-createMinecraftBot = function() {
-    const bot = originalCreateBot.call(this);
-    
-    // Добавляем обработчик команд
     bot.on('chat', (username, message) => {
         if (username === bot.username) return;
         
@@ -651,9 +570,276 @@ createMinecraftBot = function() {
             }
         }
     });
-    
+
     return bot;
-};
+}
+
+// ============================================
+// ОЧЕРЕДЬ КОМАНД
+// ============================================
+function sendCommand(command) {
+    if (!minecraftBot || !minecraftBot._client || !minecraftBot._client.connected) {
+        console.log(`⏳ Команда "${command}" будет отправлена после подключения`);
+        commandQueue.push(command);
+        return;
+    }
+
+    console.log(`📝 Отправка команды: ${command}`);
+    commandQueue.push(command);
+    processCommandQueue();
+}
+
+function processCommandQueue() {
+    if (isProcessingQueue || commandQueue.length === 0) return;
+    if (!minecraftBot || !minecraftBot._client || !minecraftBot._client.connected) {
+        console.log('⏳ Ожидание подключения для отправки команд...');
+        return;
+    }
+
+    isProcessingQueue = true;
+
+    function sendNext() {
+        if (commandQueue.length === 0) {
+            isProcessingQueue = false;
+            return;
+        }
+
+        const command = commandQueue.shift();
+        console.log(`📝 Отправка: ${command}`);
+        minecraftBot.chat(command);
+
+        setTimeout(() => {
+            sendNext();
+        }, 10000);
+    }
+
+    sendNext();
+}
+
+// ============================================
+// ПАРСИНГ TABLIST
+// ============================================
+function parseTabList(message) {
+    const playerPattern = /[a-zA-Z0-9_]{3,16}/g;
+    const players = message.match(playerPattern);
+    
+    if (players) {
+        registry.clearPlayers();
+        players.forEach(name => {
+            if (name.length >= 3 && name.length <= 16) {
+                registry.addPlayer(name);
+            }
+        });
+        registry.lastUpdate = new Date();
+        console.log(`👥 Обновлен список: ${registry.getPlayers().length} игроков`);
+    }
+}
+
+// ============================================
+// DISCORD БОТ
+// ============================================
+async function startDiscordBot() {
+    if (!config.discord.enabled) {
+        console.log('ℹ️ Discord бот отключен в конфигурации');
+        return null;
+    }
+
+    if (!config.discord.token || config.discord.token === 'YOUR_DISCORD_BOT_TOKEN') {
+        console.log('⚠️ Токен Discord не настроен!');
+        console.log('💡 Для включения Discord бота:');
+        console.log('   1. Получите токен на https://discord.com/developers/applications');
+        console.log('   2. Вставьте токен в config.discord.token');
+        return null;
+    }
+
+    try {
+        discordBot = new Discord.Client({
+            intents: [
+                Discord.GatewayIntentBits.Guilds,
+                Discord.GatewayIntentBits.GuildMessages,
+                Discord.GatewayIntentBits.MessageContent
+            ]
+        });
+
+        discordBot.on('ready', () => {
+            console.log(`✅ Discord бот запущен как ${discordBot.user.tag}`);
+        });
+
+        discordBot.on('messageCreate', async (message) => {
+            if (message.author.bot) return;
+            if (message.channelId !== config.discord.channelId) return;
+
+            const content = message.content.trim();
+            
+            // #tab - показать список игроков
+            if (content === '#tab') {
+                await message.reply('🔄 Получение списка игроков...');
+                
+                try {
+                    if (minecraftBot && minecraftBot._client && minecraftBot._client.connected) {
+                        sendCommand('/tab');
+                        await new Promise(resolve => setTimeout(resolve, 5000));
+                    }
+                    
+                    // Пробуем создать изображение
+                    let imagePath = null;
+                    if (canvas) {
+                        imagePath = generatePlayerImage();
+                    }
+                    
+                    if (imagePath && fs.existsSync(imagePath)) {
+                        await message.channel.send({
+                            content: '📋 **Список игроков в KitPvP 2:**',
+                            files: [imagePath]
+                        });
+                        fs.unlinkSync(imagePath);
+                    } else {
+                        // Используем текстовый вариант
+                        const textList = getPlayerListText();
+                        if (textList.length > 2000) {
+                            const parts = textList.match(/.{1,1900}/g) || [];
+                            for (const part of parts) {
+                                await message.channel.send(part);
+                            }
+                        } else {
+                            await message.channel.send(textList);
+                        }
+                    }
+                } catch (error) {
+                    console.error('❌ Ошибка:', error);
+                    // Отправляем текст в случае ошибки
+                    const textList = getPlayerListText();
+                    await message.channel.send(textList);
+                }
+            }
+            
+            // #connect - подключиться к серверу
+            if (content === '#connect') {
+                if (minecraftBot && minecraftBot._client && minecraftBot._client.connected) {
+                    await message.reply('✅ Бот уже подключен к серверу');
+                } else {
+                    await message.reply('🔄 Подключение к серверу...');
+                    if (reconnectTimeout) {
+                        clearTimeout(reconnectTimeout);
+                        reconnectTimeout = null;
+                    }
+                    serverRestarting = false;
+                    createMinecraftBot();
+                }
+            }
+            
+            // #disconnect - отключиться от сервера
+            if (content === '#disconnect') {
+                if (minecraftBot) {
+                    await message.reply('🔌 Отключение от сервера...');
+                    if (reconnectTimeout) {
+                        clearTimeout(reconnectTimeout);
+                        reconnectTimeout = null;
+                    }
+                    minecraftBot.end();
+                    minecraftBot = null;
+                    commandQueue = [];
+                    isProcessingQueue = false;
+                } else {
+                    await message.reply('❌ Бот уже отключен');
+                }
+            }
+            
+            // #botenemy [имя] - добавить врага
+            if (content.startsWith('#botenemy ')) {
+                const name = content.slice(10).trim();
+                if (name) {
+                    registry.addEnemy(name);
+                    await message.reply(`👿 **${name}** добавлен во враги!`);
+                }
+            }
+            
+            // #botfriend [имя] - добавить друга
+            if (content.startsWith('#botfriend ')) {
+                const name = content.slice(11).trim();
+                if (name) {
+                    registry.addFriend(name);
+                    if (minecraftBot && minecraftBot._client && minecraftBot._client.connected) {
+                        sendCommand(`/friend add ${name}`);
+                    }
+                    await message.reply(`🤝 **${name}** добавлен в друзья!`);
+                }
+            }
+            
+            // #removeenemy [имя] - удалить врага
+            if (content.startsWith('#removeenemy ')) {
+                const name = content.slice(13).trim();
+                if (name) {
+                    registry.removeEnemy(name);
+                    await message.reply(`❌ **${name}** удален из врагов!`);
+                }
+            }
+            
+            // #removefriend [имя] - удалить друга
+            if (content.startsWith('#removefriend ')) {
+                const name = content.slice(14).trim();
+                if (name) {
+                    registry.removeFriend(name);
+                    await message.reply(`❌ **${name}** удален из друзей!`);
+                }
+            }
+            
+            // #help - помощь
+            if (content === '#help') {
+                await message.reply(
+                    '📖 **Доступные команды:**\n' +
+                    '`#tab` - показать список игроков (изображение)\n' +
+                    '`#connect` - подключиться к серверу\n' +
+                    '`#disconnect` - отключиться от сервера\n' +
+                    '`#botenemy [имя]` - добавить врага\n' +
+                    '`#botfriend [имя]` - добавить друга\n' +
+                    '`#removeenemy [имя]` - удалить врага\n' +
+                    '`#removefriend [имя]` - удалить друга\n' +
+                    '`#help` - показать это сообщение'
+                );
+            }
+        });
+
+        await discordBot.login(config.discord.token);
+        console.log('✅ Discord бот успешно запущен!');
+        return discordBot;
+        
+    } catch (error) {
+        console.error('❌ Ошибка запуска Discord бота:', error.message);
+        if (error.code === 'TokenInvalid') {
+            console.log('💡 Неверный токен! Проверьте config.discord.token');
+        }
+        return null;
+    }
+}
+
+// ============================================
+// ЗАПУСК
+// ============================================
+async function startBots() {
+    console.log('🚀 Запуск ботов...');
+    console.log('=================================');
+    
+    // Запускаем Discord бота
+    await startDiscordBot();
+    
+    console.log('=================================');
+    
+    // Запускаем Minecraft бота
+    minecraftBot = createMinecraftBot();
+    
+    console.log('=================================');
+    console.log('✅ Боты готовы к работе!');
+    console.log(`📝 Имя Minecraft бота: ${config.minecraft.username}`);
+    console.log(`🌐 Сервер: ${config.minecraft.host}:${config.minecraft.port}`);
+    if (config.discord.enabled && discordBot) {
+        console.log(`📝 Discord бот: ${discordBot.user?.tag || 'активен'}`);
+    }
+    console.log('📦 Canvas: ${canvas ? "✅ Доступен" : "❌ Недоступен (будет использован текст)"}');
+    console.log('=================================');
+    console.log('📖 Команды Discord: #help');
+    console.log('📖 Команды Minecraft: !bot help');
+}
 
 // ============================================
 // ОБРАБОТКА ОШИБОК
@@ -663,9 +849,12 @@ process.on('unhandledRejection', (error) => {
 });
 
 process.on('SIGINT', () => {
-    console.log('\n🛑 Остановка бота...');
+    console.log('\n🛑 Остановка ботов...');
     if (minecraftBot) {
         minecraftBot.end();
+    }
+    if (discordBot) {
+        discordBot.destroy();
     }
     process.exit(0);
 });
@@ -673,4 +862,4 @@ process.on('SIGINT', () => {
 // ============================================
 // ЗАПУСК
 // ============================================
-startBot();
+startBots();
