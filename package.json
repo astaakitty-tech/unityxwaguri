@@ -1,18 +1,18 @@
 {
-  "name": "mineblaze-bot",
+  "name": "minecraft-tab-discord-bot",
   "version": "1.0.0",
-  "description": "Bot for MineBlaze KitPvP with Discord and Canvas",
-  "main": "index.js",
+  "description": "Бот заходит на Minecraft-сервер, читает таб-лист (список игроков) и присылает его в Discord",
+  "main": "bot.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "start": "node index.js"
+    "start": "node bot.js"
   },
   "dependencies": {
-    "mineflayer": "^4.20.1",
-    "mineflayer-pathfinder": "^2.4.5",
-    "discord.js": "^14.14.1",
-    "canvas": "^2.11.2"
-  },
-  "engines": {
-    "node": ">=16.0.0"
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "mineflayer": "^4.29.0"
   }
 }
