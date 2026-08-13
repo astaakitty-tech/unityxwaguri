@@ -10,15 +10,14 @@ const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js')
 
 // ========================= НАСТРОЙКИ (.env) =========================
 const {
-  MC_HOST,
+  MC_HOST = 'mc.mineblaze.net',
   MC_PORT = '25565',
-  MC_USERNAME = 'TabBot',
-  MC_VERSION,              // например "1.21.4"; можно оставить пустым — определится сама
-  MC_AUTH = 'offline',     // 'offline' для крякнутых серверов, 'microsoft' для лицензионного аккаунта
-
+  MC_USERNAME = 'TempestRimuru',
+  MC_VERSION = '1.8.9',               
+  MC_AUTH = 'offline',      
   DISCORD_TOKEN,
-  DISCORD_CHANNEL_ID,
-  COMMAND_PREFIX = '!',
+  DISCORD_CHANNEL_ID = '1515691427932274778',
+  COMMAND_PREFIX = '#',
 } = process.env
 
 if (!MC_HOST || !DISCORD_TOKEN || !DISCORD_CHANNEL_ID) {
