@@ -7,7 +7,7 @@ const http = require('http');
 require('dotenv').config();
 
 // ============================================
-// CANVAS (@napi-rs/canvas — работает на любом Node)
+// CANVAS
 // ============================================
 let canvas;
 try {
@@ -24,9 +24,8 @@ try {
 const config = {
     mc: {
         host: process.env.SERVER_IP || 'play.mineblaze.com',
-        // Порт НЕ указываем — используется SRV-запись сервера
         username: process.env.BOT_NAME || 'TabBot',
-        version: process.env.BOT_VERSION || '1.18.2', // ⚠️ 1.18.2 стабильнее
+        version: process.env.BOT_VERSION || '1.18.2',
         auth: 'offline',
     },
     discord: {
@@ -35,8 +34,9 @@ const config = {
     },
     tabWaitMs: 15000,
     cmdDelayMs: 10000,
-    reconnectMinMs: 5000,    // 5 сек
-    reconnectMaxMs: 60000,   // до 1 мин
+    reconnectMinMs: 5000,
+    reconnectMaxMs: 60000,
+    autoConnect: false, // ⚠️ Бот НЕ подключается к MC при старте
 };
 
 // ============================================
@@ -82,7 +82,7 @@ class Registry {
 const registry = new Registry();
 
 // ============================================
-// ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
+// ГЛОБАЛЬНЫЕ
 // ============================================
 let mcBot = null;
 let dcBot = null;
@@ -93,6 +93,7 @@ let reconnectDelay = config.reconnectMinMs;
 let cmdQueue = [];
 let cmdProcessing = false;
 let tabReadyAt = 0;
+let manualDisconnect = false; // ⚠️ флаг ручного отключения
 
 // ============================================
 // ОЧИСТКА ТЕКСТА
@@ -130,21 +131,17 @@ function displayNameToText(displayName, fallback) {
 // ============================================
 function getPlayers() {
     if (!mcBot || !mcBot.players) return [];
-
     const list = [];
     for (const name in mcBot.players) {
         const p = mcBot.players[name];
         if (!p || !p.username) continue;
         if (p.username === mcBot.username) continue;
-
-        const display = displayNameToText(p.displayName, p.username);
         list.push({
             name: p.username,
-            display,
+            display: displayNameToText(p.displayName, p.username),
             ping: typeof p.ping === 'number' ? p.ping : null,
         });
     }
-
     list.sort((a, b) => (a.ping ?? 9999) - (b.ping ?? 9999));
     return list;
 }
@@ -183,7 +180,6 @@ function generateImage() {
         const c = createCanvas(width, height);
         const ctx = c.getContext('2d');
 
-        // фон
         const g = ctx.createLinearGradient(0, 0, width, height);
         g.addColorStop(0, '#1a1a2e');
         g.addColorStop(0.5, '#16213e');
@@ -191,7 +187,6 @@ function generateImage() {
         ctx.fillStyle = g;
         ctx.fillRect(0, 0, width, height);
 
-        // заголовок
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
         ctx.fillStyle = '#ffd700';
@@ -235,7 +230,6 @@ function generateImage() {
                 ctx.textBaseline = 'middle';
                 ctx.fillStyle = color;
                 ctx.font = '13px Arial';
-
                 const pingText = p.ping !== null ? `  ${p.ping}ms` : '';
                 ctx.fillText(p.name + pingText, x + iw / 2, yy + ih / 2);
             });
@@ -247,7 +241,6 @@ function generateImage() {
         y = drawSection('Враги', '👿', enemies, '#ff4444', 'rgba(255,68,68,0.12)', y);
         y = drawSection('Нейтральные', '👤', neutral, '#aaaacc', 'rgba(255,255,255,0.06)', y);
 
-        // футер
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = '#4a4a6a';
@@ -263,9 +256,6 @@ function generateImage() {
     }
 }
 
-// ============================================
-// ТЕКСТОВЫЙ СПИСОК (fallback)
-// ============================================
 function getTextList() {
     const players = getPlayersWithStatus();
     if (players.length === 0) return '❌ Нет игроков в табе';
@@ -287,22 +277,23 @@ function getTextList() {
 // ============================================
 function createMcBot() {
     if (isConnecting) return;
+    if (mcBot?._client?.connected) return;
+
     isConnecting = true;
+    manualDisconnect = false;
     console.log(`🔄 Подключение к MC (${config.mc.host})...`);
 
-    // Порт НЕ указываем — используется SRV-запись
     const botOptions = {
         host: config.mc.host,
         username: config.mc.username,
         version: config.mc.version,
         auth: 'offline',
         keepAlive: true,
-        checkTimeoutInterval: 300000, // 5 минут
+        checkTimeoutInterval: 300000,
         hideErrors: true,
     };
 
     mcBot = mineflayer.createBot(botOptions);
-
     mcBot.loadPlugin(pathfinder);
 
     mcBot.on('login', () => {
@@ -346,32 +337,36 @@ function createMcBot() {
         if (p.username !== mcBot.username) console.log(`➕ ${p.username} зашёл`);
     });
     mcBot.on('playerLeft', (p) => console.log(`➖ ${p.username} вышел`));
-
     mcBot.on('kicked', (reason) => console.log('👢 Кикнут:', reason));
 
     mcBot.on('error', (err) => {
         const m = err.message || '';
-        if (m.includes('keepAlive')) console.log('⚠️ keepAlive — переподключение');
-        else if (m.includes('ECONNRESET')) console.log('⚠️ ECONNRESET — переподключение');
-        else if (m.includes('ETIMEDOUT')) console.log('⚠️ ETIMEDOUT — переподключение');
-        else if (m.includes('socketClosed')) console.log('⚠️ socketClosed — переподключение');
+        if (m.includes('keepAlive')) console.log('⚠️ keepAlive');
+        else if (m.includes('ECONNRESET')) console.log('⚠️ ECONNRESET');
+        else if (m.includes('ETIMEDOUT')) console.log('⚠️ ETIMEDOUT');
+        else if (m.includes('socketClosed')) console.log('⚠️ socketClosed');
         else console.error('❌', m);
     });
 
     mcBot.on('end', (reason) => {
         console.log(`🔌 Отключен: ${reason || '?'}`);
         isConnecting = false;
+
+        // ⚠️ Если отключили вручную — НЕ переподключаемся
+        if (manualDisconnect) {
+            console.log('🛑 Ручное отключение — автопереподключение отключено');
+            mcBot = null;
+            return;
+        }
+
         if (isRestarting) return;
 
         if (reconnectTimer) clearTimeout(reconnectTimer);
-
         const delay = reconnectDelay;
         reconnectDelay = Math.min(reconnectDelay * 2, config.reconnectMaxMs);
 
         console.log(`⏳ Переподключение через ${delay / 1000} сек...`);
-        reconnectTimer = setTimeout(() => {
-            createMcBot();
-        }, delay);
+        reconnectTimer = setTimeout(() => createMcBot(), delay);
     });
 
     mcBot.on('chat', (username, message) => {
@@ -404,7 +399,7 @@ function createMcBot() {
 }
 
 // ============================================
-// ОЧЕРЕДЬ КОМАНД (10 сек между отправками)
+// ОЧЕРЕДЬ КОМАНД
 // ============================================
 function sendCommand(cmd) {
     if (!mcBot?._client?.connected) {
@@ -433,11 +428,11 @@ function processQueue() {
 }
 
 // ============================================
-// DISCORD БОТ
+// DISCORD
 // ============================================
 async function startDiscord() {
     if (!config.discord.token || !config.discord.channelId) {
-        console.log('⚠️ Discord не настроен (нет токена/канала)');
+        console.log('⚠️ Discord не настроен');
         return;
     }
 
@@ -451,6 +446,7 @@ async function startDiscord() {
 
     dcBot.once('ready', () => {
         console.log(`✅ Discord: ${dcBot.user.tag}`);
+        console.log(`💡 Бот НЕ подключён к MC. Напиши #connect в Discord`);
     });
 
     dcBot.on('messageCreate', async (msg) => {
@@ -466,15 +462,48 @@ async function startDiscord() {
         try {
             switch (cmd.toLowerCase()) {
 
-                case 'tab': {
-                    await msg.reply('🔄 Собираю таб...');
+                case 'connect': {
+                    if (mcBot?._client?.connected) {
+                        await msg.reply('✅ Уже подключён');
+                    } else {
+                        await msg.reply('🔄 Подключаюсь к MC... Подожди ~20 секунд и напиши `#tab`');
+                        isRestarting = false;
+                        manualDisconnect = false;
+                        reconnectDelay = config.reconnectMinMs;
+                        if (reconnectTimer) clearTimeout(reconnectTimer);
+                        createMcBot();
+                    }
+                    break;
+                }
 
+                case 'disconnect': {
+                    if (mcBot) {
+                        await msg.reply('🔌 Отключаюсь от MC...');
+                        manualDisconnect = true;
+                        if (reconnectTimer) clearTimeout(reconnectTimer);
+                        isRestarting = false;
+                        try { mcBot.end('manual'); } catch {}
+                        mcBot = null;
+                        cmdQueue = []; cmdProcessing = false;
+                    } else {
+                        await msg.reply('❌ Уже отключён');
+                    }
+                    break;
+                }
+
+                case 'tab': {
+                    if (!mcBot?._client?.connected) {
+                        await msg.reply('❌ Бот не подключён. Напиши `#connect` сначала');
+                        break;
+                    }
+
+                    await msg.reply('🔄 Собираю таб...');
                     const wait = Math.max(0, tabReadyAt - Date.now());
                     if (wait > 0) await new Promise(r => setTimeout(r, wait));
 
                     const players = getPlayers();
                     if (players.length === 0) {
-                        await msg.channel.send('❌ Таб пуст. Бот может быть не в KitPvP 2 или ещё не загрузил данные.');
+                        await msg.channel.send('❌ Таб пуст. Возможно бот ещё не в KitPvP 2 или данные не загружены.');
                         break;
                     }
 
@@ -493,33 +522,6 @@ async function startDiscord() {
                     break;
                 }
 
-                case 'connect': {
-                    if (mcBot?._client?.connected) {
-                        await msg.reply('✅ Уже подключён');
-                    } else {
-                        await msg.reply('🔄 Подключаюсь...');
-                        isRestarting = false;
-                        reconnectDelay = config.reconnectMinMs;
-                        if (reconnectTimer) clearTimeout(reconnectTimer);
-                        createMcBot();
-                    }
-                    break;
-                }
-
-                case 'disconnect': {
-                    if (mcBot) {
-                        await msg.reply('🔌 Отключаюсь...');
-                        if (reconnectTimer) clearTimeout(reconnectTimer);
-                        isRestarting = true;
-                        mcBot.end('manual');
-                        mcBot = null;
-                        cmdQueue = []; cmdProcessing = false;
-                    } else {
-                        await msg.reply('❌ Уже отключён');
-                    }
-                    break;
-                }
-
                 case 'botenemy': {
                     if (!arg) { await msg.reply('❌ Использование: `#botenemy ник`'); break; }
                     registry.addEnemy(arg);
@@ -530,7 +532,7 @@ async function startDiscord() {
                 case 'botfriend': {
                     if (!arg) { await msg.reply('❌ Использование: `#botfriend ник`'); break; }
                     registry.addFriend(arg);
-                    sendCommand(`/friend add ${arg}`);
+                    if (mcBot?._client?.connected) sendCommand(`/friend add ${arg}`);
                     await msg.reply(`🤝 **${arg}** добавлен в друзья`);
                     break;
                 }
@@ -551,13 +553,11 @@ async function startDiscord() {
 
                 case 'status': {
                     const connected = mcBot?._client?.connected;
-                    const players = getPlayers().length;
                     await msg.reply(
                         `📊 **Статус:**\n` +
                         `🔌 MC-бот: ${connected ? '✅ подключён' : '❌ отключён'}\n` +
-                        `👥 Игроков в табе: ${players}\n` +
-                        `🔄 Задержка переподключения: ${reconnectDelay / 1000} сек\n` +
-                        `🕐 Время: ${new Date().toLocaleString()}`
+                        `👥 Игроков в табе: ${getPlayers().length}\n` +
+                        `🕐 ${new Date().toLocaleString()}`
                     );
                     break;
                 }
@@ -565,14 +565,15 @@ async function startDiscord() {
                 case 'help': {
                     await msg.reply(
                         '**Команды:**\n' +
-                        '`#tab` — показать таб (картинка)\n' +
                         '`#connect` — подключить MC-бота\n' +
                         '`#disconnect` — отключить MC-бота\n' +
+                        '`#tab` — показать таб (картинка)\n' +
                         '`#status` — статус бота\n' +
                         '`#botfriend ник` — добавить в друзья\n' +
                         '`#botenemy ник` — добавить во враги\n' +
                         '`#removefriend ник` — убрать из друзей\n' +
-                        '`#removeenemy ник` — убрать из врагов'
+                        '`#removeenemy ник` — убрать из врагов\n\n' +
+                        '⚠️ **Сначала #connect, потом #tab**'
                     );
                     break;
                 }
@@ -587,15 +588,14 @@ async function startDiscord() {
 }
 
 // ============================================
-// HTTP-СЕРВЕР (для UptimeRobot — чтобы Render не засыпал)
+// HTTP-СЕРВЕР (для UptimeRobot)
 // ============================================
 function startHttpServer() {
     const port = process.env.PORT || 3000;
-    const server = http.createServer((req, res) => {
+    http.createServer((req, res) => {
         res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
         res.end(`OK\nMC: ${mcBot?._client?.connected ? 'connected' : 'disconnected'}\nUptime: ${Math.floor(process.uptime())}s`);
-    });
-    server.listen(port, () => {
+    }).listen(port, () => {
         console.log(`🌐 HTTP-сервер на порту ${port}`);
     });
 }
@@ -609,13 +609,20 @@ async function main() {
     startHttpServer();
     await startDiscord();
     console.log('==========================================');
-    createMcBot();
+
+    // ⚠️ НЕ подключаемся к MC автоматически
+    if (config.autoConnect) {
+        console.log('🔌 Автоподключение к MC...');
+        createMcBot();
+    } else {
+        console.log('💤 Ожидание команды #connect в Discord');
+        console.log('   Напиши #connect чтобы подключить MC-бота');
+    }
+
     console.log('==========================================');
-    console.log(`📦 Canvas: ${canvas ? '✅ @napi-rs/canvas' : '❌ (текстовый режим)'}`);
-    console.log(`🌐 Сервер: ${config.mc.host} (SRV)`);
-    console.log(`🎮 Версия MC: ${config.mc.version}`);
-    console.log(`📖 Discord: #help`);
-    console.log(`📖 Minecraft: !bot help`);
+    console.log(`📦 Canvas: ${canvas ? '✅' : '❌'}`);
+    console.log(`🌐 MC сервер: ${config.mc.host} (SRV)`);
+    console.log(`🎮 Версия: ${config.mc.version}`);
     console.log('==========================================');
 }
 
