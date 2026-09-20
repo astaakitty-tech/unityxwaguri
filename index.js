@@ -1,4 +1,4 @@
-// ⚠️ Загружаем .env только если НЕ на Render (иначе .env перебивает Environment)
+// ⚠️ Загружаем .env только если НЕ на Render
 if (!process.env.RENDER) {
     require('dotenv').config();
 }
@@ -8,7 +8,6 @@ const { pathfinder } = require('mineflayer-pathfinder');
 const Discord = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-const http = require('http');
 
 // ============================================
 // 🔍 ДИАГНОСТИКА ENV
@@ -24,7 +23,6 @@ console.log('   CHANNEL_ID:', process.env.CHANNEL_ID
 console.log('   SERVER_IP:', process.env.SERVER_IP || '(по умолчанию)');
 console.log('   BOT_NAME:', process.env.BOT_NAME || '(по умолчанию)');
 console.log('   BOT_VERSION:', process.env.BOT_VERSION || '(по умолчанию)');
-console.log('   PORT:', process.env.PORT || '(не задан)');
 console.log('   RENDER:', process.env.RENDER || '(нет)');
 console.log('==========================================');
 
@@ -461,7 +459,6 @@ async function startDiscord() {
         return;
     }
 
-    // Обрезаем случайные пробелы
     const token = String(config.discord.token).trim();
     const channelId = String(config.discord.channelId).trim();
 
@@ -636,25 +633,11 @@ async function startDiscord() {
 }
 
 // ============================================
-// HTTP-СЕРВЕР
-// ============================================
-function startHttpServer() {
-    const port = process.env.PORT || 3000;
-    http.createServer((req, res) => {
-        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end(`OK\nMC: ${mcBot?._client?.connected ? 'connected' : 'disconnected'}\nUptime: ${Math.floor(process.uptime())}s`);
-    }).listen(port, () => {
-        console.log(`🌐 HTTP-сервер на порту ${port}`);
-    });
-}
-
-// ============================================
 // ЗАПУСК
 // ============================================
 async function main() {
     console.log('🚀 Старт');
     console.log('==========================================');
-    startHttpServer();
     await startDiscord();
     console.log('==========================================');
 
