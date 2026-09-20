@@ -1,6 +1,7 @@
 {
   "name": "mineblaze-tab-bot",
   "version": "1.0.0",
+  "description": "MineBlaze KitPvP tab bot for Discord",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -10,7 +11,7 @@
     "mineflayer-pathfinder": "^2.4.5",
     "discord.js": "^14.14.1",
     "dotenv": "^16.4.5",
-    "canvas": "^2.11.2"
+    "@napi-rs/canvas": "^0.1.65"
   },
   "engines": {
     "node": ">=18.0.0"
