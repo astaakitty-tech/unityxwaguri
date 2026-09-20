@@ -1,139 +1,118 @@
-// bot.js
-// Бот заходит на Minecraft-сервер, считывает список игроков (таб-лист)
-// и отправляет его в указанный канал Discord.
-//
-// Запуск: npm install && npm start
+const mineflayer = require('mineflayer');
+const Discord = require('discord.js');
+require('dotenv').config();
 
-require('dotenv').config()
-const mineflayer = require('mineflayer')
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js')
+// ==================== КОНФИГУРАЦИЯ ====================
+const config = {
+    serverIP: process.env.SERVER_IP || 'play.mineblaze.com',
+    serverPort: parseInt(process.env.SERVER_PORT) || 25565,
+    botName: process.env.BOT_NAME || `TabBot_${Math.floor(Math.random() * 1000)}`,
+    botVersion: process.env.BOT_VERSION || '1.20.4',
+    discordToken: process.env.DISCORD_TOKEN,
+    discordChannelId: process.env.CHANNEL_ID,
+    updateInterval: 30000,
+};
 
-// ========================= НАСТРОЙКИ (.env) =========================
-const {
-  MC_HOST = 'mc.mineblaze.net',
-  MC_PORT = '25565',
-  MC_USERNAME = 'TempestRimuru',
-  MC_VERSION = '1.8.9',               
-  MC_AUTH = 'offline',      
-  DISCORD_TOKEN,
-  DISCORD_CHANNEL_ID = '1515691427932274778',
-  COMMAND_PREFIX = '#',
-} = process.env
-
-if (!MC_HOST || !DISCORD_TOKEN || !DISCORD_CHANNEL_ID) {
-  console.error('Ошибка: заполни MC_HOST, DISCORD_TOKEN и DISCORD_CHANNEL_ID в файле .env')
-  process.exit(1)
+// ==================== ОЧИСТКА ТЕКСТА MINECRAFT ====================
+function cleanMinecraftText(text) {
+    if (!text) return '';
+    // Удаляем цветовые коды (§a, §b, §l и т.д.)
+    return text.replace(/§[0-9a-fklmnor]/g, '').trim();
 }
 
-const GAMEMODE_NAMES = ['Выживание', 'Творческий', 'Приключение', 'Наблюдатель']
-const gamemodeName = (id) => GAMEMODE_NAMES[id] ?? 'Неизвестно'
+// ==================== ПАРСИНГ ТАБА (КАК НА СКРИНЕ) ====================
+function parseTabList(bot) {
+    try {
+        if (!bot || !bot.players) return '❌ Бот не подключен';
 
-// ========================= DISCORD =========================
-const discord = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent, // привилегированный intent — включи его в Developer Portal
-  ],
-})
+        // Сортируем игроков по пингу (как на скрине)
+        const players = Object.values(bot.players)
+            .filter(p => p.username !== bot.username)
+            .sort((a, b) => (a.ping || 999) - (b.ping || 999));
 
-let mcBot = null
+        let tabText = '';
 
-discord.once('ready', () => {
-  console.log(`[Discord] Вошёл как ${discord.user.tag}`)
-})
+        players.forEach(player => {
+            // Получаем отображаемое имя (содержит ранг, клан, уровень)
+            let displayName = player.displayName ? player.displayName.toString() : player.username;
+            displayName = cleanMinecraftText(displayName);
 
-// Команда !tab (или !players) — прислать список игроков по запросу
-discord.on('messageCreate', async (message) => {
-  if (message.author.bot) return
-  if (message.channelId !== DISCORD_CHANNEL_ID) return
+            // Пинг
+            const ping = player.ping || '?';
+            
+            // Формат: Ранг | Ник [Клан] [Уровень] Пинг ms
+            // Если displayName уже содержит пинг, убираем его, чтобы не дублировать
+            let line = `${displayName} ${ping} ms`;
+            
+            tabText += line + '\n';
+        });
 
-  const content = message.content.trim().toLowerCase()
-  if (content !== `${COMMAND_PREFIX}tab` && content !== `${COMMAND_PREFIX}players`) return
+        // Футер со скрина
+        tabText += '\nStaff in Vanish: 1';
 
-  await message.channel.send({ embeds: [buildTabEmbed()] }).catch((err) =>
-    console.error('[Discord] Не удалось отправить сообщение:', err)
-  )
-})
-
-discord.login(DISCORD_TOKEN)
-
-// ========================= ТАБ-ЛИСТ → EMBED =========================
-function buildTabEmbed() {
-  if (!mcBot || !mcBot.player) {
-    return new EmbedBuilder()
-      .setTitle('Таб-лист')
-      .setDescription('⚠️ Бот сейчас не подключён к серверу.')
-      .setColor(0xe74c3c)
-  }
-
-  const players = Object.values(mcBot.players).filter(
-    (p) => p.username !== mcBot.username
-  )
-
-  const lines = players.map((p) => {
-    const ping = typeof p.ping === 'number' ? `${p.ping} мс` : '—'
-    const mode = p.gamemode !== undefined ? `, ${gamemodeName(p.gamemode)}` : ''
-    return `• **${p.username}** — ${ping}${mode}`
-  })
-
-  return new EmbedBuilder()
-    .setTitle(`Онлайн на сервере: ${players.length}`)
-    .setDescription(lines.length ? lines.join('\n') : 'Сейчас на сервере никого нет.')
-    .setColor(0x2ecc71)
-    .setFooter({ text: MC_HOST })
-    .setTimestamp()
+        return tabText || 'На сервере никого нет';
+    } catch (error) {
+        console.error('Ошибка парсинга:', error);
+        return '❌ Ошибка получения данных';
+    }
 }
 
-async function sendTabToDiscord() {
-  try {
-    const channel = await discord.channels.fetch(DISCORD_CHANNEL_ID)
-    await channel.send({ embeds: [buildTabEmbed()] })
-  } catch (err) {
-    console.error('[Discord] Не удалось отправить таб-лист:', err.message)
-  }
+// ==================== ОТПРАВКА В DISCORD ====================
+async function sendTabToDiscord(client, tabData) {
+    try {
+        const channel = client.channels.cache.get(config.discordChannelId);
+        if (!channel) return;
+
+        const embed = new Discord.EmbedBuilder()
+            .setTitle('📊 Таб игроков MineBlaze (KitPvP 2)')
+            .setDescription(`\`\`\`\n${tabData}\n\`\`\``)
+            .setColor(0x2b2d31) // Тёмный цвет как в Discord
+            .setFooter({ text: `Обновлено: ${new Date().toLocaleTimeString('ru-RU')}` })
+            .setTimestamp();
+
+        await channel.send({ embeds: [embed] });
+        console.log('✅ Таб отправлен!');
+    } catch (error) {
+        console.error('❌ Ошибка Discord:', error);
+    }
 }
 
-// ========================= MINECRAFT =========================
-let reconnectTimer = null
+// ==================== ЗАПУСК ====================
+const discordClient = new Discord.Client({
+    intents: [Discord.GatewayIntentBits.Guilds, Discord.GatewayIntentBits.GuildMessages]
+});
 
-function connectMinecraftBot() {
-  mcBot = mineflayer.createBot({
-    host: MC_HOST,
-    port: Number(MC_PORT),
-    username: MC_USERNAME,
-    version: MC_VERSION || false,
-    auth: MC_AUTH, // 'offline' | 'microsoft'
-  })
+discordClient.once('ready', () => {
+    console.log(`✅ Discord бот ${discordClient.user.tag} запущен!`);
 
-  mcBot.once('spawn', () => {
-    console.log('[Minecraft] Бот зашёл на сервер')
-    // небольшая пауза, чтобы сервер успел прислать полный список игроков
-    setTimeout(sendTabToDiscord, 3000)
-  })
+    const bot = mineflayer.createBot({
+        host: config.serverIP,
+        port: config.serverPort,
+        username: config.botName,
+        version: config.botVersion,
+        auth: 'offline'
+    });
 
-  mcBot.on('kicked', (reason) => {
-    console.log('[Minecraft] Бота кикнули с сервера:', reason)
-  })
+    bot.on('login', () => {
+        console.log(`✅ Бот ${config.botName} зашёл на сервер!`);
+        
+        // Ждём загрузки и отправляем таб
+        setTimeout(() => {
+            const tabData = parseTabList(bot);
+            sendTabToDiscord(discordClient, tabData);
+        }, 5000);
 
-  mcBot.on('error', (err) => {
-    console.log('[Minecraft] Ошибка соединения:', err.message)
-  })
+        // Обновление каждые 30 секунд
+        setInterval(() => {
+            if (bot && bot.connected) {
+                const tabData = parseTabList(bot);
+                sendTabToDiscord(discordClient, tabData);
+            }
+        }, config.updateInterval);
+    });
 
-  mcBot.on('end', () => {
-    console.log('[Minecraft] Соединение потеряно, переподключение через 15 секунд…')
-    clearTimeout(reconnectTimer)
-    reconnectTimer = setTimeout(connectMinecraftBot, 15000)
-  })
-}
+    bot.on('error', (err) => console.error('❌ Ошибка бота:', err));
+    bot.on('end', () => console.log('🔄 Бот отключился, перезапуск...'));
+});
 
-connectMinecraftBot()
-
-// Аккуратное завершение по Ctrl+C
-process.on('SIGINT', () => {
-  console.log('\nЗавершение работы…')
-  clearTimeout(reconnectTimer)
-  if (mcBot) mcBot.quit()
-  discord.destroy()
-  process.exit(0)
-})
+discordClient.login(config.discordToken);
