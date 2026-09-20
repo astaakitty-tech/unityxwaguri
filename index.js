@@ -24,7 +24,7 @@ try {
 const config = {
     mc: {
         host: process.env.SERVER_IP || 'play.mineblaze.com',
-        username: process.env.BOT_NAME || 'TabBot',
+        username: process.env.BOT_NAME || 'Unity',
         version: process.env.BOT_VERSION || '1.18.2',
         auth: 'offline',
     },
@@ -36,7 +36,7 @@ const config = {
     cmdDelayMs: 10000,
     reconnectMinMs: 5000,
     reconnectMaxMs: 60000,
-    autoConnect: false, // ⚠️ Бот НЕ подключается к MC при старте
+    autoConnect: false, // Бот ждёт !connect
 };
 
 // ============================================
@@ -93,7 +93,7 @@ let reconnectDelay = config.reconnectMinMs;
 let cmdQueue = [];
 let cmdProcessing = false;
 let tabReadyAt = 0;
-let manualDisconnect = false; // ⚠️ флаг ручного отключения
+let manualDisconnect = false;
 
 // ============================================
 // ОЧИСТКА ТЕКСТА
@@ -352,7 +352,6 @@ function createMcBot() {
         console.log(`🔌 Отключен: ${reason || '?'}`);
         isConnecting = false;
 
-        // ⚠️ Если отключили вручную — НЕ переподключаемся
         if (manualDisconnect) {
             console.log('🛑 Ручное отключение — автопереподключение отключено');
             mcBot = null;
@@ -428,11 +427,11 @@ function processQueue() {
 }
 
 // ============================================
-// DISCORD
+// DISCORD (все команды через !)
 // ============================================
 async function startDiscord() {
     if (!config.discord.token || !config.discord.channelId) {
-        console.log('⚠️ Discord не настроен');
+        console.log('⚠️ Discord не настроен (нет DISCORD_TOKEN или CHANNEL_ID)');
         return;
     }
 
@@ -446,7 +445,7 @@ async function startDiscord() {
 
     dcBot.once('ready', () => {
         console.log(`✅ Discord: ${dcBot.user.tag}`);
-        console.log(`💡 Бот НЕ подключён к MC. Напиши #connect в Discord`);
+        console.log(`💡 Напиши !help для списка команд`);
     });
 
     dcBot.on('messageCreate', async (msg) => {
@@ -454,7 +453,7 @@ async function startDiscord() {
         if (msg.channelId !== config.discord.channelId) return;
 
         const content = msg.content.trim();
-        if (!content.startsWith('#')) return;
+        if (!content.startsWith('!')) return;
 
         const [cmd, ...rest] = content.slice(1).split(' ');
         const arg = rest.join(' ').trim();
@@ -466,7 +465,7 @@ async function startDiscord() {
                     if (mcBot?._client?.connected) {
                         await msg.reply('✅ Уже подключён');
                     } else {
-                        await msg.reply('🔄 Подключаюсь к MC... Подожди ~20 секунд и напиши `#tab`');
+                        await msg.reply('🔄 Подключаюсь к MC... Подожди ~20 секунд и напиши `!tab`');
                         isRestarting = false;
                         manualDisconnect = false;
                         reconnectDelay = config.reconnectMinMs;
@@ -493,7 +492,7 @@ async function startDiscord() {
 
                 case 'tab': {
                     if (!mcBot?._client?.connected) {
-                        await msg.reply('❌ Бот не подключён. Напиши `#connect` сначала');
+                        await msg.reply('❌ Бот не подключён. Напиши `!connect` сначала');
                         break;
                     }
 
@@ -523,14 +522,14 @@ async function startDiscord() {
                 }
 
                 case 'botenemy': {
-                    if (!arg) { await msg.reply('❌ Использование: `#botenemy ник`'); break; }
+                    if (!arg) { await msg.reply('❌ Использование: `!botenemy ник`'); break; }
                     registry.addEnemy(arg);
                     await msg.reply(`👿 **${arg}** добавлен во враги`);
                     break;
                 }
 
                 case 'botfriend': {
-                    if (!arg) { await msg.reply('❌ Использование: `#botfriend ник`'); break; }
+                    if (!arg) { await msg.reply('❌ Использование: `!botfriend ник`'); break; }
                     registry.addFriend(arg);
                     if (mcBot?._client?.connected) sendCommand(`/friend add ${arg}`);
                     await msg.reply(`🤝 **${arg}** добавлен в друзья`);
@@ -538,14 +537,14 @@ async function startDiscord() {
                 }
 
                 case 'removeenemy': {
-                    if (!arg) { await msg.reply('❌ Использование: `#removeenemy ник`'); break; }
+                    if (!arg) { await msg.reply('❌ Использование: `!removeenemy ник`'); break; }
                     registry.removeEnemy(arg);
                     await msg.reply(`❌ **${arg}** удалён из врагов`);
                     break;
                 }
 
                 case 'removefriend': {
-                    if (!arg) { await msg.reply('❌ Использование: `#removefriend ник`'); break; }
+                    if (!arg) { await msg.reply('❌ Использование: `!removefriend ник`'); break; }
                     registry.removeFriend(arg);
                     await msg.reply(`❌ **${arg}** удалён из друзей`);
                     break;
@@ -565,15 +564,15 @@ async function startDiscord() {
                 case 'help': {
                     await msg.reply(
                         '**Команды:**\n' +
-                        '`#connect` — подключить MC-бота\n' +
-                        '`#disconnect` — отключить MC-бота\n' +
-                        '`#tab` — показать таб (картинка)\n' +
-                        '`#status` — статус бота\n' +
-                        '`#botfriend ник` — добавить в друзья\n' +
-                        '`#botenemy ник` — добавить во враги\n' +
-                        '`#removefriend ник` — убрать из друзей\n' +
-                        '`#removeenemy ник` — убрать из врагов\n\n' +
-                        '⚠️ **Сначала #connect, потом #tab**'
+                        '`!connect` — подключить MC-бота\n' +
+                        '`!disconnect` — отключить MC-бота\n' +
+                        '`!tab` — показать таб (картинка)\n' +
+                        '`!status` — статус бота\n' +
+                        '`!botfriend ник` — добавить в друзья\n' +
+                        '`!botenemy ник` — добавить во враги\n' +
+                        '`!removefriend ник` — убрать из друзей\n' +
+                        '`!removeenemy ник` — убрать из врагов\n\n' +
+                        '⚠️ **Сначала !connect, потом !tab**'
                     );
                     break;
                 }
@@ -588,7 +587,7 @@ async function startDiscord() {
 }
 
 // ============================================
-// HTTP-СЕРВЕР (для UptimeRobot)
+// HTTP-СЕРВЕР
 // ============================================
 function startHttpServer() {
     const port = process.env.PORT || 3000;
@@ -610,13 +609,12 @@ async function main() {
     await startDiscord();
     console.log('==========================================');
 
-    // ⚠️ НЕ подключаемся к MC автоматически
     if (config.autoConnect) {
         console.log('🔌 Автоподключение к MC...');
         createMcBot();
     } else {
-        console.log('💤 Ожидание команды #connect в Discord');
-        console.log('   Напиши #connect чтобы подключить MC-бота');
+        console.log('💤 Ожидание команды !connect в Discord');
+        console.log('   Напиши !connect чтобы подключить MC-бота');
     }
 
     console.log('==========================================');
