@@ -6,12 +6,12 @@ const path = require('path');
 require('dotenv').config();
 
 // ============================================
-// CANVAS (опционально)
+// CANVAS (@napi-rs/canvas — работает на любом Node)
 // ============================================
 let canvas;
 try {
-    canvas = require('canvas');
-    console.log('✅ Canvas загружен');
+    canvas = require('@napi-rs/canvas');
+    console.log('✅ @napi-rs/canvas загружен');
 } catch (e) {
     console.log('⚠️ Canvas не найден — текстовый режим');
     canvas = null;
@@ -32,16 +32,16 @@ const config = {
         token: process.env.DISCORD_TOKEN,
         channelId: process.env.CHANNEL_ID,
     },
-    tabWaitMs: 15000,   // ждём загрузки таба
+    tabWaitMs: 15000,   // ждём загрузки таба после логина
     cmdDelayMs: 10000,  // задержка между командами в MC
 };
 
 // ============================================
-// РЕЕСТР ДРУЗЕЙ/ВРАГОВ (регистронезависимый)
+// РЕЕСТР ДРУЗЕЙ / ВРАГОВ (регистронезависимый)
 // ============================================
 class Registry {
     constructor() {
-        this.friends = new Map(); // UPPER -> original
+        this.friends = new Map();
         this.enemies = new Map();
         this.load();
     }
@@ -79,7 +79,7 @@ class Registry {
 const registry = new Registry();
 
 // ============================================
-// ГЛОБАЛЬНЫЕ
+// ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
 // ============================================
 let mcBot = null;
 let dcBot = null;
@@ -91,7 +91,7 @@ let cmdProcessing = false;
 let tabReadyAt = 0;
 
 // ============================================
-// ОЧИСТКА ТЕКСТА MC
+// ОЧИСТКА ТЕКСТА
 // ============================================
 function clean(text) {
     if (!text) return '';
@@ -101,13 +101,11 @@ function clean(text) {
         .trim();
 }
 
-// Парсер отображаемого имени (displayName может быть JSON)
 function displayNameToText(displayName, fallback) {
     if (!displayName) return fallback;
     if (typeof displayName === 'string') return clean(displayName);
     if (displayName.toString) {
         const str = displayName.toString();
-        // Если это JSON — пытаемся вытащить текст
         if (str.startsWith('{')) {
             try {
                 const json = JSON.parse(str);
@@ -124,7 +122,7 @@ function displayNameToText(displayName, fallback) {
 }
 
 // ============================================
-// ПОЛУЧЕНИЕ СПИСКА ИГРОКОВ (БЕЗ /tab)
+// СПИСОК ИГРОКОВ (без /tab — читаем из bot.players)
 // ============================================
 function getPlayers() {
     if (!mcBot || !mcBot.players) return [];
@@ -234,7 +232,6 @@ function generateImage() {
                 ctx.fillStyle = color;
                 ctx.font = '13px Arial';
 
-                // ник + пинг
                 const pingText = p.ping !== null ? `  ${p.ping}ms` : '';
                 ctx.fillText(p.name + pingText, x + iw / 2, yy + ih / 2);
             });
@@ -263,7 +260,7 @@ function generateImage() {
 }
 
 // ============================================
-// ТЕКСТОВЫЙ СПИСОК
+// ТЕКСТОВЫЙ СПИСОК (fallback)
 // ============================================
 function getTextList() {
     const players = getPlayersWithStatus();
@@ -318,7 +315,6 @@ function createMcBot() {
 
     mcBot.on('spawn', () => console.log('✅ Спавн'));
 
-    // Перехват сообщений сервера
     mcBot.on('message', (msg) => {
         const text = msg.toString();
         console.log('📨', text);
@@ -340,11 +336,8 @@ function createMcBot() {
         }
     });
 
-    // ❗ Таблица игроков обновляется автоматически через player_info
     mcBot.on('playerJoined', (p) => {
-        if (p.username !== mcBot.username) {
-            console.log(`➕ ${p.username} зашёл`);
-        }
+        if (p.username !== mcBot.username) console.log(`➕ ${p.username} зашёл`);
     });
     mcBot.on('playerLeft', (p) => console.log(`➖ ${p.username} вышел`));
 
@@ -361,7 +354,7 @@ function createMcBot() {
     mcBot.on('end', (reason) => {
         console.log(`🔌 Отключен: ${reason || '?'}`);
         isConnecting = false;
-        if (isRestarting) return; // уже переподключаемся
+        if (isRestarting) return;
 
         if (reconnectTimer) clearTimeout(reconnectTimer);
         reconnectTimer = setTimeout(() => {
@@ -370,7 +363,7 @@ function createMcBot() {
         }, 10000);
     });
 
-    // Чат-команды в MC
+    // Чат-команды в Minecraft
     mcBot.on('chat', (username, message) => {
         if (username === mcBot.username) return;
         if (!message.startsWith('!bot')) return;
@@ -381,7 +374,7 @@ function createMcBot() {
                 if (arg) { registry.addFriend(arg); sendCommand(`/friend add ${arg}`); }
                 break;
             case 'enemy':
-                if (arg) { registry.addEnemy(arg); }
+                if (arg) registry.addEnemy(arg);
                 break;
             case 'removefriend':
                 if (arg) registry.removeFriend(arg);
@@ -401,7 +394,7 @@ function createMcBot() {
 }
 
 // ============================================
-// ОЧЕРЕДЬ КОМАНД (задержка 10с)
+// ОЧЕРЕДЬ КОМАНД (10 сек между отправками)
 // ============================================
 function sendCommand(cmd) {
     if (!mcBot?._client?.connected) {
@@ -430,7 +423,7 @@ function processQueue() {
 }
 
 // ============================================
-// DISCORD
+// DISCORD БОТ
 // ============================================
 async function startDiscord() {
     if (!config.discord.token || !config.discord.channelId) {
@@ -467,7 +460,6 @@ async function startDiscord() {
                 case 'tab': {
                     await msg.reply('🔄 Собираю таб...');
 
-                    // Ждём, пока таб реально загрузится
                     const wait = Math.max(0, tabReadyAt - Date.now());
                     if (wait > 0) await new Promise(r => setTimeout(r, wait));
 
@@ -510,7 +502,7 @@ async function startDiscord() {
                     if (mcBot) {
                         await msg.reply('🔌 Отключаюсь...');
                         if (reconnectTimer) clearTimeout(reconnectTimer);
-                        isRestarting = true; // чтобы не переподключался
+                        isRestarting = true;
                         mcBot.end('manual');
                         mcBot = null;
                         cmdQueue = []; cmdProcessing = false;
@@ -587,7 +579,7 @@ async function main() {
     console.log('==========================================');
     createMcBot();
     console.log('==========================================');
-    console.log(`📦 Canvas: ${canvas ? '✅' : '❌ (текстовый режим)'}`);
+    console.log(`📦 Canvas: ${canvas ? '✅ @napi-rs/canvas' : '❌ (текстовый режим)'}`);
     console.log(`📖 Discord: #help`);
     console.log(`📖 Minecraft: !bot help`);
     console.log('==========================================');
