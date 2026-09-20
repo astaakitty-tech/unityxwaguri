@@ -1,10 +1,32 @@
+// ⚠️ Загружаем .env только если НЕ на Render (иначе .env перебивает Environment)
+if (!process.env.RENDER) {
+    require('dotenv').config();
+}
+
 const mineflayer = require('mineflayer');
 const { pathfinder } = require('mineflayer-pathfinder');
 const Discord = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-require('dotenv').config();
+
+// ============================================
+// 🔍 ДИАГНОСТИКА ENV
+// ============================================
+console.log('==========================================');
+console.log('🔍 ДИАГНОСТИКА ENV:');
+console.log('   DISCORD_TOKEN:', process.env.DISCORD_TOKEN
+    ? `✅ есть (${process.env.DISCORD_TOKEN.length} символов)`
+    : '❌ НЕТ');
+console.log('   CHANNEL_ID:', process.env.CHANNEL_ID
+    ? `✅ есть (${process.env.CHANNEL_ID})`
+    : '❌ НЕТ');
+console.log('   SERVER_IP:', process.env.SERVER_IP || '(по умолчанию)');
+console.log('   BOT_NAME:', process.env.BOT_NAME || '(по умолчанию)');
+console.log('   BOT_VERSION:', process.env.BOT_VERSION || '(по умолчанию)');
+console.log('   PORT:', process.env.PORT || '(не задан)');
+console.log('   RENDER:', process.env.RENDER || '(нет)');
+console.log('==========================================');
 
 // ============================================
 // CANVAS
@@ -36,7 +58,7 @@ const config = {
     cmdDelayMs: 10000,
     reconnectMinMs: 5000,
     reconnectMaxMs: 60000,
-    autoConnect: false, // Бот ждёт !connect
+    autoConnect: false,
 };
 
 // ============================================
@@ -427,13 +449,24 @@ function processQueue() {
 }
 
 // ============================================
-// DISCORD (все команды через !)
+// DISCORD БОТ
 // ============================================
 async function startDiscord() {
-    if (!config.discord.token || !config.discord.channelId) {
-        console.log('⚠️ Discord не настроен (нет DISCORD_TOKEN или CHANNEL_ID)');
+    if (!config.discord.token) {
+        console.log('❌ DISCORD_TOKEN отсутствует — Discord бот не запущен');
         return;
     }
+    if (!config.discord.channelId) {
+        console.log('❌ CHANNEL_ID отсутствует — Discord бот не запущен');
+        return;
+    }
+
+    // Обрезаем случайные пробелы
+    const token = String(config.discord.token).trim();
+    const channelId = String(config.discord.channelId).trim();
+
+    console.log(`🔑 Токен: ${token.length} символов`);
+    console.log(`📢 Канал: ${channelId}`);
 
     dcBot = new Discord.Client({
         intents: [
@@ -444,13 +477,19 @@ async function startDiscord() {
     });
 
     dcBot.once('ready', () => {
+        console.log('==========================================');
         console.log(`✅ Discord: ${dcBot.user.tag}`);
-        console.log(`💡 Напиши !help для списка команд`);
+        console.log(`📡 Слушаю канал: ${channelId}`);
+        console.log('==========================================');
+    });
+
+    dcBot.on('error', (err) => {
+        console.error('❌ Discord error:', err.message);
     });
 
     dcBot.on('messageCreate', async (msg) => {
         if (msg.author.bot) return;
-        if (msg.channelId !== config.discord.channelId) return;
+        if (msg.channelId !== channelId) return;
 
         const content = msg.content.trim();
         if (!content.startsWith('!')) return;
@@ -583,7 +622,17 @@ async function startDiscord() {
         }
     });
 
-    await dcBot.login(config.discord.token);
+    try {
+        await dcBot.login(token);
+    } catch (e) {
+        console.error('❌ Не удалось залогиниться в Discord:', e.message);
+        if (e.message.includes('TOKEN_INVALID') || e.message.includes('invalid token')) {
+            console.log('💡 Токен неверный. Проверь:');
+            console.log('   1. Скопирован ли токен полностью из Developer Portal');
+            console.log('   2. Нет ли пробелов/кавычек в начале и конце');
+            console.log('   3. Не сброшен ли токен после того как ты его скопировал');
+        }
+    }
 }
 
 // ============================================
