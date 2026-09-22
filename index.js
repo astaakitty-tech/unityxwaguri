@@ -1,10 +1,4 @@
-// ==========================================
-// MineBlaze Discord Bot
-// ==========================================
-
 const mineflayer = require('mineflayer');
-const { Pool } = require('pg');
-
 const {
   Client,
   GatewayIntentBits,
@@ -12,89 +6,54 @@ const {
   Routes,
   SlashCommandBuilder
 } = require('discord.js');
+const { Pool } = require('pg');
 
-// ==========================================
+// =========================
 // ENV
-// ==========================================
+// =========================
 
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
-const CHANNEL_ID = process.env.CHANNEL_ID;
+const {
+  DISCORD_TOKEN,
+  DISCORD_CLIENT_ID,
+  CHANNEL_ID,
 
-const MINECRAFT_HOST =
-  process.env.MINECRAFT_HOST || 'mc.mineblaze.net';
+  MINECRAFT_HOST,
+  MINECRAFT_PORT,
+  MINECRAFT_USERNAME,
+  MINECRAFT_VERSION,
 
-const MINECRAFT_PORT =
-  Number(process.env.MINECRAFT_PORT || 25565);
+  SERVER_PASSWORD,
+  DATABASE_URL
+} = process.env;
 
-const MINECRAFT_USERNAME =
-  process.env.MINECRAFT_USERNAME;
-
-const MINECRAFT_VERSION =
-  process.env.MINECRAFT_VERSION || undefined;
-
-const SERVER_PASSWORD =
-  process.env.SERVER_PASSWORD;
-
-const DATABASE_URL =
-  process.env.DATABASE_URL;
-
-// ==========================================
+// =========================
 // CHECK ENV
-// ==========================================
+// =========================
 
-if (!DISCORD_TOKEN) {
-  console.error('❌ DISCORD_TOKEN не указан');
-  process.exit(1);
-}
+const required = {
+  DISCORD_TOKEN,
+  DISCORD_CLIENT_ID,
+  CHANNEL_ID,
 
-if (!DISCORD_CLIENT_ID) {
-  console.error('❌ DISCORD_CLIENT_ID не указан');
-  process.exit(1);
-}
+  MINECRAFT_HOST,
+  MINECRAFT_PORT,
+  MINECRAFT_USERNAME,
+  MINECRAFT_VERSION,
 
-if (!CHANNEL_ID) {
-  console.error('❌ CHANNEL_ID не указан');
-  process.exit(1);
-}
+  SERVER_PASSWORD,
+  DATABASE_URL
+};
 
-if (!MINECRAFT_USERNAME) {
-  console.error('❌ MINECRAFT_USERNAME не указан');
-  process.exit(1);
-}
-
-if (!DATABASE_URL) {
-  console.error('❌ DATABASE_URL не указан');
-  process.exit(1);
-}
-
-// ==========================================
-// POSTGRESQL
-// ==========================================
-
-const db = new Pool({
-  connectionString: DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
+for (const [key, value] of Object.entries(required)) {
+  if (!value) {
+    console.error(`❌ Не указана переменная ${key}`);
+    process.exit(1);
   }
-});
-
-async function initDatabase() {
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS tracked_players (
-      name TEXT PRIMARY KEY,
-      type TEXT NOT NULL
-        CHECK (type IN ('friend', 'enemy')),
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  console.log('✅ PostgreSQL готов');
 }
 
-// ==========================================
+// =========================
 // DISCORD
-// ==========================================
+// =========================
 
 const discord = new Client({
   intents: [
@@ -104,1105 +63,930 @@ const discord = new Client({
 
 let discordChannel = null;
 
-async function getDiscordChannel() {
-  try {
-    if (discordChannel) {
-      return discordChannel;
-    }
+// =========================
+// POSTGRESQL
+// =========================
 
-    discordChannel =
-      await discord.channels.fetch(CHANNEL_ID);
-
-    if (!discordChannel) {
-      console.error(
-        '❌ Discord канал не найден'
-      );
-
-      return null;
-    }
-
-    return discordChannel;
-
-  } catch (err) {
-    console.error(
-      '❌ Ошибка получения Discord канала:',
-      err.message
-    );
-
-    return null;
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
   }
+});
+
+async function initDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS tracked_players (
+      name TEXT PRIMARY KEY,
+      type TEXT NOT NULL CHECK (type IN ('friend', 'enemy')),
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  console.log('✅ PostgreSQL готов');
 }
 
-async function sendDiscord(message) {
-  try {
-    const channel =
-      await getDiscordChannel();
-
-    if (!channel) return;
-
-    await channel.send(message);
-
-  } catch (err) {
-    console.error(
-      '❌ Ошибка отправки в Discord:',
-      err.message
-    );
-  }
-}
-
-// ==========================================
-// FRIENDS / ENEMIES
-// ==========================================
+// =========================
+// DATABASE FUNCTIONS
+// =========================
 
 async function addTrackedPlayer(name, type) {
-  name = name.trim();
-
-  // Игрок не может одновременно быть другом и врагом
-  await db.query(
-    `
-    DELETE FROM tracked_players
-    WHERE LOWER(name) = LOWER($1)
-    `,
+  // Удаляем игрока из обеих категорий независимо от регистра
+  await pool.query(
+    `DELETE FROM tracked_players WHERE LOWER(name) = LOWER($1)`,
     [name]
   );
 
-  await db.query(
-    `
-    INSERT INTO tracked_players
-      (name, type)
-    VALUES
-      ($1, $2)
-    `,
+  await pool.query(
+    `INSERT INTO tracked_players (name, type)
+     VALUES ($1, $2)
+     ON CONFLICT (name)
+     DO UPDATE SET type = EXCLUDED.type`,
     [name, type]
   );
 }
 
 async function removeTrackedPlayer(name, type) {
-  const result = await db.query(
-    `
-    DELETE FROM tracked_players
-    WHERE LOWER(name) = LOWER($1)
-      AND type = $2
-    RETURNING name
-    `,
-    [
-      name.trim(),
-      type
-    ]
+  await pool.query(
+    `DELETE FROM tracked_players
+     WHERE LOWER(name) = LOWER($1)
+     AND type = $2`,
+    [name, type]
   );
-
-  return result.rowCount > 0;
 }
 
 async function getPlayerType(name) {
-  const result = await db.query(
-    `
-    SELECT type
-    FROM tracked_players
-    WHERE LOWER(name) = LOWER($1)
-    LIMIT 1
-    `,
+  const result = await pool.query(
+    `SELECT type
+     FROM tracked_players
+     WHERE LOWER(name) = LOWER($1)
+     LIMIT 1`,
     [name]
   );
 
-  if (result.rows.length === 0) {
-    return null;
-  }
-
-  return result.rows[0].type;
+  return result.rows[0]?.type || null;
 }
 
 async function getTrackedPlayers(type) {
-  const result = await db.query(
-    `
-    SELECT name
-    FROM tracked_players
-    WHERE type = $1
-    ORDER BY LOWER(name)
-    `,
+  const result = await pool.query(
+    `SELECT name
+     FROM tracked_players
+     WHERE type = $1
+     ORDER BY LOWER(name)`,
     [type]
   );
 
-  return result.rows;
+  return result.rows.map(row => row.name);
 }
 
-// ==========================================
-// MINECRAFT
-// ==========================================
-
-let mcBot = null;
-
-let reconnectTimer = null;
-let leaveTimer = null;
-
-let intentionalLeave = false;
-let verificationDetected = false;
-
-// ==========================================
-// VERIFICATION DETECTION
-// ==========================================
-
-function checkForVerification(message) {
-  if (!message) return;
-
-  const text = String(message);
-  const lower = text.toLowerCase();
-
-  const keywords = [
-    'captcha',
-    'verify',
-    'verification',
-    'проверка',
-    'антибот',
-    'анти-бот',
-    'подтвердите',
-    'подтверди'
-  ];
-
-  const detected =
-    keywords.some(
-      keyword => lower.includes(keyword)
-    );
-
-  if (!detected) {
-    return;
-  }
-
-  const urls =
-    text.match(
-      /https?:\/\/[^\s<>()]+/gi
-    ) || [];
-
-  verificationDetected = true;
-  intentionalLeave = true;
-
-  console.log(
-    '⚠️ Обнаружена возможная проверка MineBlaze'
-  );
-
-  if (urls.length > 0) {
-
-    sendDiscord(
-      `🚨 **MineBlaze запросил проверку бота!**\n\n` +
-      `🔗 ${urls.join('\n')}\n\n` +
-      `После проверки используй **/reconnect**.`
-    );
-
-  } else {
-
-    sendDiscord(
-      `🚨 **MineBlaze запросил проверку бота!**\n\n` +
-      `Сообщение сервера:\n` +
-      `\`\`\`\n${text.slice(0, 1500)}\n\`\`\`\n` +
-      `После проверки используй **/reconnect**.`
-    );
-  }
-}
-
-// ==========================================
-// TAB
-// ==========================================
-
-async function getTabText() {
-
-  if (!mcBot || !mcBot.players) {
-    return '❌ Minecraft бот сейчас не подключен.';
-  }
-
-  const players =
-    Object.values(mcBot.players)
-      .filter(
-        player =>
-          player &&
-          player.username
-      );
-
-  const friends = [];
-  const enemies = [];
-  const normalPlayers = [];
-
-  for (const player of players) {
-
-    const type =
-      await getPlayerType(
-        player.username
-      );
-
-    if (type === 'friend') {
-
-      friends.push(player);
-
-    } else if (type === 'enemy') {
-
-      enemies.push(player);
-
-    } else {
-
-      normalPlayers.push(player);
-    }
-  }
-
-  const sortPlayers = list => {
-
-    list.sort(
-      (a, b) =>
-        a.username.localeCompare(
-          b.username,
-          undefined,
-          {
-            sensitivity: 'base'
-          }
-        )
-    );
-  };
-
-  sortPlayers(friends);
-  sortPlayers(enemies);
-  sortPlayers(normalPlayers);
-
-  let text = '';
-
-  // ========================================
-  // HEADER
-  // ========================================
-
-  text += '👑 MineBlaze TAB\n';
-
-  text +=
-    `👥 Игроков: ${players.length}\n`;
-
-  text +=
-    '━━━━━━━━━━━━━━━━━━━━\n\n';
-
-  // ========================================
-  // FRIENDS
-  // ========================================
-
-  text +=
-    `🟢 FRIENDS (${friends.length})\n`;
-
-  if (friends.length === 0) {
-
-    text +=
-      '— нет друзей онлайн\n';
-
-  } else {
-
-    for (const player of friends) {
-
-      const ping =
-        Number.isFinite(player.ping)
-          ? player.ping
-          : 0;
-
-      text +=
-        `🟢 ${player.username}  |  ${ping} ms\n`;
-    }
-  }
-
-  text += '\n';
-
-  // ========================================
-  // ENEMIES
-  // ========================================
-
-  text +=
-    `🔴 ENEMIES (${enemies.length})\n`;
-
-  if (enemies.length === 0) {
-
-    text +=
-      '— врагов онлайн нет\n';
-
-  } else {
-
-    for (const player of enemies) {
-
-      const ping =
-        Number.isFinite(player.ping)
-          ? player.ping
-          : 0;
-
-      text +=
-        `🔴 ${player.username}  |  ${ping} ms\n`;
-    }
-  }
-
-  text += '\n';
-
-  // ========================================
-  // PLAYERS
-  // ========================================
-
-  text +=
-    `🔵 PLAYERS (${normalPlayers.length})\n`;
-
-  for (const player of normalPlayers) {
-
-    const ping =
-      Number.isFinite(player.ping)
-        ? player.ping
-        : 0;
-
-    text +=
-      `👤 ${player.username}  |  ${ping} ms\n`;
-  }
-
-  return text;
-}
-
-// ==========================================
-// CONNECT MINECRAFT
-// ==========================================
-
-function connectMinecraft() {
-
-  if (mcBot) {
-
-    try {
-      mcBot.quit();
-    } catch {}
-
-    mcBot = null;
-  }
-
-  clearTimeout(reconnectTimer);
-  clearTimeout(leaveTimer);
-
-  verificationDetected = false;
-
-  console.log(
-    `🔌 Подключение к ` +
-    `${MINECRAFT_HOST}:${MINECRAFT_PORT}...`
-  );
-
-  mcBot = mineflayer.createBot({
-
-    host: MINECRAFT_HOST,
-
-    port: MINECRAFT_PORT,
-
-    username: MINECRAFT_USERNAME,
-
-    version: MINECRAFT_VERSION,
-
-    auth: 'offline'
-  });
-
-  // ========================================
-  // SPAWN
-  // ========================================
-
-  mcBot.once('spawn', async () => {
-
-    console.log(
-      '✅ Minecraft бот вошёл на сервер'
-    );
-
-    intentionalLeave = false;
-
-    await sendDiscord(
-      '🟢 **Minecraft бот вошёл на MineBlaze.**'
-    );
-
-    // ======================================
-    // LOGIN
-    // ======================================
-
-    if (SERVER_PASSWORD) {
-
-      setTimeout(() => {
-
-        try {
-
-          mcBot.chat(
-            `/login ${SERVER_PASSWORD}`
-          );
-
-          console.log(
-            '🔐 Отправлена команда /login'
-          );
-
-        } catch {}
-      }, 2500);
-    }
-
-    // ======================================
-    // KITPVP 2
-    // ======================================
-
-    setTimeout(() => {
-
-      try {
-
-        mcBot.chat('/kp2');
-
-        console.log(
-          '⚔️ Отправлена команда /kp2'
-        );
-
-      } catch {}
-
-    }, 5000);
-
-    // ======================================
-    // 10 MINUTES
-    // ======================================
-
-    leaveTimer =
-      setTimeout(
-        async () => {
-
-          if (!mcBot) {
-            return;
-          }
-
-          intentionalLeave = true;
-
-          await sendDiscord(
-            '⏰ **Прошло 10 минут.**\n' +
-            'Minecraft бот выходит с MineBlaze.\n\n' +
-            'Для повторного входа используй **/reconnect**.'
-          );
-
-          try {
-            mcBot.quit();
-          } catch {}
-
-        },
-        10 * 60 * 1000
-      );
-  });
-
-  // ========================================
-  // MINECRAFT CHAT
-  // ========================================
-
-  mcBot.on(
-    'message',
-    jsonMsg => {
-
-      const text =
-        jsonMsg.toString();
-
-      console.log(
-        '[MC]',
-        text
-      );
-
-      checkForVerification(text);
-    }
-  );
-
-  // ========================================
-  // KICK
-  // ========================================
-
-  mcBot.on(
-    'kicked',
-    reason => {
-
-      console.log(
-        '❌ Minecraft бот кикнут:',
-        reason
-      );
-
-      const reasonText =
-        typeof reason === 'string'
-          ? reason
-          : JSON.stringify(reason);
-
-      checkForVerification(
-        reasonText
-      );
-    }
-  );
-
-  // ========================================
-  // ERROR
-  // ========================================
-
-  mcBot.on(
-    'error',
-    err => {
-
-      console.error(
-        '❌ Minecraft ошибка:',
-        err.message
-      );
-    }
-  );
-
-  // ========================================
-  // END
-  // ========================================
-
-  mcBot.on(
-    'end',
-    () => {
-
-      console.log(
-        '🔌 Minecraft соединение закрыто'
-      );
-
-      clearTimeout(leaveTimer);
-
-      mcBot = null;
-
-      // Специальный выход
-      if (
-        intentionalLeave ||
-        verificationDetected
-      ) {
-
-        console.log(
-          '🛑 Автопереподключение отключено'
-        );
-
-        return;
-      }
-
-      // Неожиданное отключение
-      console.log(
-        '🔄 Повторное подключение через 5 секунд...'
-      );
-
-      reconnectTimer =
-        setTimeout(
-          () => {
-            connectMinecraft();
-          },
-          5000
-        );
-    }
-  );
-}
-
-// ==========================================
-// SLASH COMMANDS
-// ==========================================
+// =========================
+// COMMANDS
+// =========================
 
 const commands = [
 
-  // /kp2
   new SlashCommandBuilder()
     .setName('kp2')
-    .setDescription(
-      'Перейти в KitPvP 2'
-    ),
+    .setDescription('Перейти на KitPvP 2'),
 
-  // /tab
   new SlashCommandBuilder()
     .setName('tab')
-    .setDescription(
-      'Показать TAB MineBlaze'
-    ),
+    .setDescription('Показать игроков онлайн'),
 
-  // /reconnect
-  new SlashCommandBuilder()
-    .setName('reconnect')
-    .setDescription(
-      'Переподключить Minecraft бота'
-    ),
-
-  // /friendadd
   new SlashCommandBuilder()
     .setName('friendadd')
-    .setDescription(
-      'Добавить игрока в друзья'
-    )
+    .setDescription('Добавить игрока в друзья')
     .addStringOption(option =>
       option
         .setName('ник')
-        .setDescription(
-          'Ник игрока'
-        )
+        .setDescription('Ник игрока')
         .setRequired(true)
     ),
 
-  // /friendremove
   new SlashCommandBuilder()
     .setName('friendremove')
-    .setDescription(
-      'Удалить игрока из друзей'
-    )
+    .setDescription('Удалить игрока из друзей')
     .addStringOption(option =>
       option
         .setName('ник')
-        .setDescription(
-          'Ник игрока'
-        )
+        .setDescription('Ник игрока')
         .setRequired(true)
     ),
 
-  // /friends
-  new SlashCommandBuilder()
-    .setName('friends')
-    .setDescription(
-      'Показать список друзей'
-    ),
-
-  // /enemyadd
   new SlashCommandBuilder()
     .setName('enemyadd')
-    .setDescription(
-      'Добавить игрока во враги'
-    )
+    .setDescription('Добавить игрока во враги')
     .addStringOption(option =>
       option
         .setName('ник')
-        .setDescription(
-          'Ник игрока'
-        )
+        .setDescription('Ник игрока')
         .setRequired(true)
     ),
 
-  // /enemyremove
   new SlashCommandBuilder()
     .setName('enemyremove')
-    .setDescription(
-      'Удалить игрока из врагов'
-    )
+    .setDescription('Удалить игрока из врагов')
     .addStringOption(option =>
       option
         .setName('ник')
-        .setDescription(
-          'Ник игрока'
-        )
+        .setDescription('Ник игрока')
         .setRequired(true)
     ),
 
-  // /enemies
+  new SlashCommandBuilder()
+    .setName('friends')
+    .setDescription('Показать список друзей'),
+
   new SlashCommandBuilder()
     .setName('enemies')
-    .setDescription(
-      'Показать список врагов'
-    )
+    .setDescription('Показать список врагов')
+].map(command => command.toJSON());
 
-].map(
-  command => command.toJSON()
-);
-
-// ==========================================
+// =========================
 // REGISTER COMMANDS
-// ==========================================
+// =========================
 
 async function registerCommands() {
-
-  const rest =
-    new REST({
-      version: '10'
-    })
-      .setToken(
-        DISCORD_TOKEN
-      );
+  const rest = new REST({ version: '10' })
+    .setToken(DISCORD_TOKEN);
 
   await rest.put(
-
-    Routes.applicationCommands(
-      DISCORD_CLIENT_ID
-    ),
-
+    Routes.applicationCommands(DISCORD_CLIENT_ID),
     {
       body: commands
     }
   );
 
-  console.log(
-    '✅ Slash-команды зарегистрированы'
-  );
+  console.log('✅ Slash-команды зарегистрированы');
 }
 
-// ==========================================
-// DISCORD READY
-// ==========================================
+// =========================
+// MINECRAFT
+// =========================
 
-discord.once(
-  'ready',
-  () => {
+let mcBot = null;
+let intentionalLeave = false;
+let reconnectTimer = null;
+let leaveTimer = null;
 
-    console.log(
-      `🤖 Discord бот запущен: ` +
-      `${discord.user.tag}`
+let lastVerificationMessage = '';
+
+function connectMinecraft() {
+
+  if (mcBot) {
+    try {
+      mcBot.quit();
+    } catch {}
+  }
+
+  intentionalLeave = false;
+
+  console.log(
+    `🔌 Подключение к ${MINECRAFT_HOST}:${MINECRAFT_PORT}...`
+  );
+
+  mcBot = mineflayer.createBot({
+    host: MINECRAFT_HOST,
+    port: Number(MINECRAFT_PORT),
+    username: MINECRAFT_USERNAME,
+    version: MINECRAFT_VERSION
+  });
+
+  // =========================
+  // LOGIN
+  // =========================
+
+  mcBot.once('login', () => {
+    console.log('🟢 Minecraft login успешен');
+  });
+
+  // =========================
+  // SPAWN
+  // =========================
+
+  mcBot.once('spawn', async () => {
+
+    console.log('🟢 Бот зашёл на MineBlaze');
+
+    await sendDiscord(
+      '🟢 Бот подключился к MineBlaze'
+    );
+
+    // Переход на KitPvP 2
+    setTimeout(() => {
+      if (mcBot) {
+        console.log('➡️ Отправляю /kp2');
+        mcBot.chat('/kp2');
+      }
+    }, 3000);
+
+    // Через 10 минут выходим
+    clearTimeout(leaveTimer);
+
+    leaveTimer = setTimeout(async () => {
+
+      console.log('⏰ Прошло 10 минут');
+
+      await sendDiscord(
+        '⏰ Бот пробыл на MineBlaze 10 минут и выходит.'
+      );
+
+      intentionalLeave = true;
+
+      try {
+        mcBot.quit();
+      } catch {}
+
+    }, 10 * 60 * 1000);
+  });
+
+  // =========================
+  // CHAT
+  // =========================
+
+  mcBot.on('message', async (message) => {
+
+    const text = message.toString();
+
+    console.log(`[MC] ${text}`);
+
+    await checkForVerification(text);
+  });
+
+  // =========================
+  // KICK
+  // =========================
+
+  mcBot.on('kicked', async (reason) => {
+
+    console.log('⚠️ Minecraft kick:', reason);
+
+    await sendDiscord(
+      `⚠️ Бот был кикнут с MineBlaze.\n\`\`\`\n${String(reason).slice(0, 1500)}\n\`\`\``
+    );
+  });
+
+  // =========================
+  // END
+  // =========================
+
+  mcBot.on('end', async () => {
+
+    console.log('🔴 Minecraft соединение закрыто');
+
+    clearTimeout(leaveTimer);
+
+    if (intentionalLeave) {
+      console.log('ℹ️ Автоматический reconnect отключён.');
+      return;
+    }
+
+    scheduleReconnect();
+  });
+
+  // =========================
+  // ERROR
+  // =========================
+
+  mcBot.on('error', error => {
+    console.error('❌ Minecraft error:', error.message);
+  });
+}
+
+// =========================
+// RECONNECT
+// =========================
+
+function scheduleReconnect() {
+
+  if (reconnectTimer) {
+    return;
+  }
+
+  console.log('🔄 Переподключение через 15 секунд...');
+
+  reconnectTimer = setTimeout(() => {
+
+    reconnectTimer = null;
+
+    console.log('🔄 Переподключаю Minecraft...');
+
+    connectMinecraft();
+
+  }, 15000);
+}
+
+// =========================
+// VERIFICATION / CAPTCHA
+// =========================
+
+async function checkForVerification(text) {
+
+  const lower = text.toLowerCase();
+
+  const keywords = [
+    'captcha',
+    'капча',
+    'verify',
+    'verification',
+    'верифика',
+    'антибот',
+    'anti-bot',
+    'проверка'
+  ];
+
+  const isVerification = keywords.some(word =>
+    lower.includes(word)
+  );
+
+  if (!isVerification) {
+    return;
+  }
+
+  if (text === lastVerificationMessage) {
+    return;
+  }
+
+  lastVerificationMessage = text;
+
+  const urls = text.match(
+    /https?:\/\/[^\s<>()]+/gi
+  ) || [];
+
+  let message =
+    '⚠️ **MineBlaze запросил проверку бота.**\n\n';
+
+  if (urls.length > 0) {
+
+    message +=
+      '🔗 Ссылка на проверку:\n' +
+      urls.join('\n');
+
+  } else {
+
+    message +=
+      '```text\n' +
+      text.slice(0, 1500) +
+      '\n```';
+  }
+
+  await sendDiscord(message);
+
+  // Не пытаемся обходить проверку
+  intentionalLeave = true;
+}
+
+// =========================
+// DISPLAY NAME
+// =========================
+
+function getPlainText(value) {
+
+  if (!value) {
+    return '';
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(getPlainText).join('');
+  }
+
+  if (typeof value === 'object') {
+
+    let result = '';
+
+    if (typeof value.text === 'string') {
+      result += value.text;
+    }
+
+    if (value.extra) {
+      result += value.extra
+        .map(getPlainText)
+        .join('');
+    }
+
+    return result;
+  }
+
+  return '';
+}
+
+// =========================
+// REMOVE MINECRAFT COLORS
+// =========================
+
+function cleanMinecraftText(text) {
+
+  return String(text)
+    .replace(/§[0-9a-fk-or]/gi, '')
+    .replace(/\x1b\[[0-9;]*m/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// =========================
+// GET RANK
+// =========================
+
+function getPlayerRank(player) {
+
+  const username = player.username;
+
+  let display = '';
+
+  try {
+    display = cleanMinecraftText(
+      getPlainText(player.displayName)
+    );
+  } catch {
+    display = '';
+  }
+
+  if (!display) {
+    return '—';
+  }
+
+  // Убираем ник из displayName
+  let beforeName = display;
+
+  const index = display
+    .toLowerCase()
+    .indexOf(username.toLowerCase());
+
+  if (index !== -1) {
+    beforeName = display.slice(0, index).trim();
+  }
+
+  // Если перед ником ничего нет
+  if (!beforeName) {
+    return '—';
+  }
+
+  // Убираем лишние разделители
+  beforeName = beforeName
+    .replace(/^[\s|•»«>:_\-]+/, '')
+    .replace(/[\s|•»«>:_\-]+$/, '')
+    .trim();
+
+  if (!beforeName) {
+    return '—';
+  }
+
+  // Ограничиваем слишком длинные значения
+  if (beforeName.length > 20) {
+    return '—';
+  }
+
+  return beforeName;
+}
+
+// =========================
+// TAB PLAYER
+// =========================
+
+async function formatPlayer(player) {
+
+  const username = player.username;
+
+  const ping =
+    typeof player.ping === 'number'
+      ? `${player.ping} ms`
+      : '? ms';
+
+  const rank = getPlayerRank(player);
+
+  const type = await getPlayerType(username);
+
+  let prefix = '👤';
+
+  if (type === 'friend') {
+    prefix = '🟢';
+  }
+
+  if (type === 'enemy') {
+    prefix = '🔴';
+  }
+
+  return {
+    prefix,
+    rank,
+    username,
+    ping,
+    type
+  };
+}
+
+// =========================
+// TAB
+// =========================
+
+async function getTabList() {
+
+  if (!mcBot || !mcBot.players) {
+    return '❌ Minecraft бот сейчас не подключён.';
+  }
+
+  const players = Object.values(mcBot.players);
+
+  const friends = [];
+  const enemies = [];
+  const normal = [];
+
+  for (const player of players) {
+
+    if (!player || !player.username) {
+      continue;
+    }
+
+    // Не показываем Staff in Vanish
+    if (
+      player.username
+        .toLowerCase()
+        .includes('staff in vanish')
+    ) {
+      continue;
+    }
+
+    const data = await formatPlayer(player);
+
+    if (data.type === 'friend') {
+      friends.push(data);
+    } else if (data.type === 'enemy') {
+      enemies.push(data);
+    } else {
+      normal.push(data);
+    }
+  }
+
+  const sortPlayers = list =>
+    list.sort((a, b) =>
+      a.username
+        .toLowerCase()
+        .localeCompare(
+          b.username.toLowerCase()
+        )
+    );
+
+  sortPlayers(friends);
+  sortPlayers(enemies);
+  sortPlayers(normal);
+
+  let output = '';
+
+  // =========================
+  // FRIENDS
+  // =========================
+
+  if (friends.length > 0) {
+
+    output += '🟢 **FRIENDS**\n';
+    output += '```text\n';
+
+    for (const p of friends) {
+
+      output +=
+        `| ${p.rank.padEnd(10)} | ` +
+        `${p.username.padEnd(16)} | ` +
+        `${p.ping}\n`;
+    }
+
+    output += '```\n\n';
+  }
+
+  // =========================
+  // ENEMIES
+  // =========================
+
+  if (enemies.length > 0) {
+
+    output += '🔴 **ENEMIES**\n';
+    output += '```text\n';
+
+    for (const p of enemies) {
+
+      output +=
+        `| ${p.rank.padEnd(10)} | ` +
+        `${p.username.padEnd(16)} | ` +
+        `${p.ping}\n`;
+    }
+
+    output += '```\n\n';
+  }
+
+  // =========================
+  // NORMAL
+  // =========================
+
+  if (normal.length > 0) {
+
+    output += '👤 **PLAYERS**\n';
+    output += '```text\n';
+
+    for (const p of normal) {
+
+      output +=
+        `| ${p.rank.padEnd(10)} | ` +
+        `${p.username.padEnd(16)} | ` +
+        `${p.ping}\n`;
+    }
+
+    output += '```';
+  }
+
+  if (!output) {
+    return '❌ Игроки не найдены.';
+  }
+
+  return output;
+}
+
+// =========================
+// SEND LONG DISCORD MESSAGE
+// =========================
+
+async function sendLongDiscord(content) {
+
+  if (!discordChannel) {
+    return;
+  }
+
+  // Discord максимум ~2000 символов
+  const maxLength = 1900;
+
+  let text = content;
+
+  while (text.length > maxLength) {
+
+    let cut = text.lastIndexOf('\n', maxLength);
+
+    if (cut <= 0) {
+      cut = maxLength;
+    }
+
+    const part = text.slice(0, cut);
+
+    await discordChannel.send(part);
+
+    text = text.slice(cut);
+  }
+
+  if (text.trim()) {
+    await discordChannel.send(text);
+  }
+}
+
+// =========================
+// SEND DISCORD
+// =========================
+
+async function sendDiscord(message) {
+
+  try {
+
+    if (!discordChannel) {
+      discordChannel =
+        await discord.channels.fetch(CHANNEL_ID);
+    }
+
+    if (!discordChannel) {
+      console.error('❌ Discord канал не найден');
+      return;
+    }
+
+    await sendLongDiscord(message);
+
+  } catch (error) {
+
+    console.error(
+      '❌ Ошибка отправки Discord:',
+      error.message
     );
   }
-);
+}
 
-// ==========================================
+// =========================
+// DISCORD READY
+// =========================
+
+discord.once('ready', async () => {
+
+  console.log(
+    `🤖 Discord бот запущен: ${discord.user.tag}`
+  );
+
+  try {
+    discordChannel =
+      await discord.channels.fetch(CHANNEL_ID);
+  } catch (error) {
+    console.error(
+      '❌ Не удалось получить Discord канал:',
+      error.message
+    );
+  }
+});
+
+// =========================
 // DISCORD COMMANDS
-// ==========================================
+// =========================
 
-discord.on(
-  'interactionCreate',
-  async interaction => {
+discord.on('interactionCreate', async interaction => {
 
-    if (!interaction.isChatInputCommand()) {
-      return;
-    }
+  if (!interaction.isChatInputCommand()) {
+    return;
+  }
 
-    const command =
-      interaction.commandName;
+  try {
 
-    // ======================================
+    // =====================
     // /kp2
-    // ======================================
+    // =====================
 
-    if (command === 'kp2') {
+    if (interaction.commandName === 'kp2') {
 
       if (!mcBot) {
-
-        return interaction.reply(
-          '❌ Minecraft бот сейчас не подключен.'
+        await interaction.reply(
+          '❌ Minecraft бот не подключён.'
         );
+        return;
       }
 
-      try {
+      mcBot.chat('/kp2');
 
-        mcBot.chat('/kp2');
+      await interaction.reply(
+        '➡️ Отправил `/kp2` в Minecraft.'
+      );
 
-        return interaction.reply(
-          '⚔️ Команда `/kp2` отправлена.'
-        );
-
-      } catch {
-
-        return interaction.reply(
-          '❌ Не удалось отправить `/kp2`.'
-        );
-      }
+      return;
     }
 
-    // ======================================
+    // =====================
     // /tab
-    // ======================================
+    // =====================
 
-    if (command === 'tab') {
-
-      if (!mcBot) {
-
-        return interaction.reply(
-          '❌ Minecraft бот сейчас не подключен.'
-        );
-      }
+    if (interaction.commandName === 'tab') {
 
       await interaction.deferReply();
 
-      try {
+      const tab = await getTabList();
 
-        const tab =
-          await getTabText();
-
-        /*
-         * Discord ограничивает
-         * обычное сообщение 2000 символами.
-         */
-
-        const chunks = [];
-
-        let current = '';
-
-        for (
-          const line of tab.split('\n')
-        ) {
-
-          if (
-            (current + line + '\n').length
-            > 1900
-          ) {
-
-            if (current.length > 0) {
-              chunks.push(current);
-            }
-
-            current =
-              line + '\n';
-
-          } else {
-
-            current +=
-              line + '\n';
-          }
-        }
-
-        if (current.length > 0) {
-          chunks.push(current);
-        }
-
-        if (chunks.length === 0) {
-
-          return interaction.editReply(
-            '❌ TAB пуст.'
-          );
-        }
-
-        // Первую часть отправляем как ответ
-        await interaction.editReply(
-          `\`\`\`\n${chunks[0]}\`\`\``
-        );
-
-        // Остальные части отдельными сообщениями
-        for (
-          let i = 1;
-          i < chunks.length;
-          i++
-        ) {
-
-          await interaction.followUp(
-            `\`\`\`\n${chunks[i]}\`\`\``
-          );
-        }
-
-      } catch (err) {
-
-        console.error(
-          '❌ Ошибка /tab:',
-          err
-        );
-
-        if (
-          interaction.deferred
-        ) {
-
-          await interaction.editReply(
-            '❌ Не удалось получить TAB.'
-          );
-        }
-      }
+      await interaction.editReply(tab);
 
       return;
     }
 
-    // ======================================
-    // /reconnect
-    // ======================================
-
-    if (command === 'reconnect') {
-
-      await interaction.deferReply();
-
-      intentionalLeave = false;
-      verificationDetected = false;
-
-      clearTimeout(
-        reconnectTimer
-      );
-
-      clearTimeout(
-        leaveTimer
-      );
-
-      if (mcBot) {
-
-        try {
-          mcBot.quit();
-        } catch {}
-
-        mcBot = null;
-      }
-
-      await interaction.editReply(
-        '🔄 Переподключение к MineBlaze через 2 секунды...'
-      );
-
-      setTimeout(
-        () => {
-          connectMinecraft();
-        },
-        2000
-      );
-
-      return;
-    }
-
-    // ======================================
+    // =====================
     // /friendadd
-    // ======================================
+    // =====================
 
-    if (command === 'friendadd') {
+    if (interaction.commandName === 'friendadd') {
 
       const name =
-        interaction.options.getString(
-          'ник'
-        );
+        interaction.options.getString('ник');
 
-      try {
+      await addTrackedPlayer(name, 'friend');
 
-        await addTrackedPlayer(
-          name,
-          'friend'
-        );
+      await interaction.reply(
+        `🟢 **${name}** добавлен в друзья.`
+      );
 
-        return interaction.reply(
-          `🟢 **${name}** добавлен в друзья.`
-        );
-
-      } catch (err) {
-
-        console.error(err);
-
-        return interaction.reply(
-          '❌ Не удалось добавить игрока.'
-        );
-      }
+      return;
     }
 
-    // ======================================
+    // =====================
     // /friendremove
-    // ======================================
+    // =====================
 
-    if (command === 'friendremove') {
+    if (interaction.commandName === 'friendremove') {
 
       const name =
-        interaction.options.getString(
-          'ник'
-        );
+        interaction.options.getString('ник');
 
-      const removed =
-        await removeTrackedPlayer(
-          name,
-          'friend'
-        );
+      await removeTrackedPlayer(name, 'friend');
 
-      if (!removed) {
-
-        return interaction.reply(
-          `❌ **${name}** не найден в друзьях.`
-        );
-      }
-
-      return interaction.reply(
+      await interaction.reply(
         `🗑️ **${name}** удалён из друзей.`
       );
+
+      return;
     }
 
-    // ======================================
-    // /friends
-    // ======================================
-
-    if (command === 'friends') {
-
-      const rows =
-        await getTrackedPlayers(
-          'friend'
-        );
-
-      if (rows.length === 0) {
-
-        return interaction.reply(
-          '🟢 Список друзей пуст.'
-        );
-      }
-
-      const list =
-        rows
-          .map(
-            row =>
-              `🟢 ${row.name}`
-          )
-          .join('\n');
-
-      return interaction.reply(
-        `**🟢 Друзья (${rows.length})**\n${list}`
-      );
-    }
-
-    // ======================================
+    // =====================
     // /enemyadd
-    // ======================================
+    // =====================
 
-    if (command === 'enemyadd') {
+    if (interaction.commandName === 'enemyadd') {
 
       const name =
-        interaction.options.getString(
-          'ник'
-        );
+        interaction.options.getString('ник');
 
-      try {
+      await addTrackedPlayer(name, 'enemy');
 
-        await addTrackedPlayer(
-          name,
-          'enemy'
-        );
+      await interaction.reply(
+        `🔴 **${name}** добавлен во враги.`
+      );
 
-        return interaction.reply(
-          `🔴 **${name}** добавлен во враги.`
-        );
-
-      } catch (err) {
-
-        console.error(err);
-
-        return interaction.reply(
-          '❌ Не удалось добавить игрока.'
-        );
-      }
+      return;
     }
 
-    // ======================================
+    // =====================
     // /enemyremove
-    // ======================================
+    // =====================
 
-    if (command === 'enemyremove') {
+    if (interaction.commandName === 'enemyremove') {
 
       const name =
-        interaction.options.getString(
-          'ник'
-        );
+        interaction.options.getString('ник');
 
-      const removed =
-        await removeTrackedPlayer(
-          name,
-          'enemy'
-        );
+      await removeTrackedPlayer(name, 'enemy');
 
-      if (!removed) {
-
-        return interaction.reply(
-          `❌ **${name}** не найден во врагах.`
-        );
-      }
-
-      return interaction.reply(
+      await interaction.reply(
         `🗑️ **${name}** удалён из врагов.`
       );
+
+      return;
     }
 
-    // ======================================
-    // /enemies
-    // ======================================
+    // =====================
+    // /friends
+    // =====================
 
-    if (command === 'enemies') {
+    if (interaction.commandName === 'friends') {
 
-      const rows =
-        await getTrackedPlayers(
-          'enemy'
+      const friends =
+        await getTrackedPlayers('friend');
+
+      if (friends.length === 0) {
+
+        await interaction.reply(
+          '🟢 Список друзей пуст.'
         );
 
-      if (rows.length === 0) {
-
-        return interaction.reply(
-          '🔴 Список врагов пуст.'
-        );
+        return;
       }
 
-      const list =
-        rows
-          .map(
-            row =>
-              `🔴 ${row.name}`
-          )
-          .join('\n');
-
-      return interaction.reply(
-        `**🔴 Враги (${rows.length})**\n${list}`
+      await interaction.reply(
+        '🟢 **FRIENDS**\n\n' +
+        friends.map(name => `• ${name}`).join('\n')
       );
+
+      return;
+    }
+
+    // =====================
+    // /enemies
+    // =====================
+
+    if (interaction.commandName === 'enemies') {
+
+      const enemies =
+        await getTrackedPlayers('enemy');
+
+      if (enemies.length === 0) {
+
+        await interaction.reply(
+          '🔴 Список врагов пуст.'
+        );
+
+        return;
+      }
+
+      await interaction.reply(
+        '🔴 **ENEMIES**\n\n' +
+        enemies.map(name => `• ${name}`).join('\n')
+      );
+
+      return;
+    }
+
+  } catch (error) {
+
+    console.error(
+      '❌ Ошибка Discord команды:',
+      error
+    );
+
+    if (interaction.replied ||
+        interaction.deferred) {
+
+      await interaction.editReply(
+        '❌ Произошла ошибка при выполнении команды.'
+      ).catch(() => {});
+
+    } else {
+
+      await interaction.reply(
+        '❌ Произошла ошибка.'
+      ).catch(() => {});
     }
   }
-);
+});
 
-// ==========================================
+// =========================
 // START
-// ==========================================
+// =========================
 
 async function start() {
 
@@ -1212,17 +996,15 @@ async function start() {
 
     await registerCommands();
 
-    await discord.login(
-      DISCORD_TOKEN
-    );
+    await discord.login(DISCORD_TOKEN);
 
     connectMinecraft();
 
-  } catch (err) {
+  } catch (error) {
 
     console.error(
       '❌ Ошибка запуска:',
-      err
+      error
     );
 
     process.exit(1);
