@@ -9,29 +9,34 @@ const {
     Events
 } = require('discord.js');
 
-// =========================
-// НАСТРОЙКИ ИЗ RENDER
-// =========================
+
+// ========================================
+// НАСТРОЙКИ RENDER
+// ========================================
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 
-const MINECRAFT_HOST = process.env.MINECRAFT_HOST || 'mc.mineblaze.net';
-const MINECRAFT_PORT = Number(process.env.MINECRAFT_PORT) || 25565;
-const MINECRAFT_USERNAME = process.env.MINECRAFT_USERNAME;
-const MINECRAFT_VERSION = process.env.MINECRAFT_VERSION || undefined;
+const MINECRAFT_HOST =
+    process.env.MINECRAFT_HOST || 'mc.mineblaze.net';
 
-const SERVER_PASSWORD = process.env.SERVER_PASSWORD;
+const MINECRAFT_PORT =
+    Number(process.env.MINECRAFT_PORT) || 25565;
 
-// Команда для перехода в KitPvP 2
-const KITPVP2_COMMAND =
-    process.env.KITPVP2_COMMAND || '/server kitpvp2';
+const MINECRAFT_USERNAME =
+    process.env.MINECRAFT_USERNAME;
+
+const MINECRAFT_VERSION =
+    process.env.MINECRAFT_VERSION || undefined;
+
+const SERVER_PASSWORD =
+    process.env.SERVER_PASSWORD;
 
 
-// =========================
+// ========================================
 // ПРОВЕРКА НАСТРОЕК
-// =========================
+// ========================================
 
 if (!DISCORD_TOKEN) {
     console.error('[ERROR] Не указан DISCORD_TOKEN');
@@ -54,9 +59,9 @@ if (!MINECRAFT_USERNAME) {
 }
 
 
-// =========================
+// ========================================
 // DISCORD
-// =========================
+// ========================================
 
 const discord = new Client({
     intents: [
@@ -65,18 +70,18 @@ const discord = new Client({
 });
 
 
-// =========================
+// ========================================
 // MINECRAFT
-// =========================
+// ========================================
 
 let mcBot = null;
 let reconnectTimer = null;
 let isConnecting = false;
 
 
-// =========================
-// СОЗДАНИЕ MINECRAFT БОТА
-// =========================
+// ========================================
+// ПОДКЛЮЧЕНИЕ К MINECRAFT
+// ========================================
 
 function connectMinecraft() {
 
@@ -84,17 +89,15 @@ function connectMinecraft() {
         return;
     }
 
-    if (mcBot) {
-        try {
-            mcBot.quit();
-        } catch (e) {}
-    }
-
     isConnecting = true;
 
     console.log('[MC] Подключение к MineBlaze...');
-    console.log(`[MC] Сервер: ${MINECRAFT_HOST}:${MINECRAFT_PORT}`);
-    console.log(`[MC] Ник: ${MINECRAFT_USERNAME}`);
+    console.log(
+        `[MC] Сервер: ${MINECRAFT_HOST}:${MINECRAFT_PORT}`
+    );
+    console.log(
+        `[MC] Ник: ${MINECRAFT_USERNAME}`
+    );
 
     const options = {
         host: MINECRAFT_HOST,
@@ -107,36 +110,61 @@ function connectMinecraft() {
         options.version = MINECRAFT_VERSION;
     }
 
-    mcBot = mineflayer.createBot(options);
+    try {
+
+        mcBot = mineflayer.createBot(options);
+
+    } catch (error) {
+
+        console.error(
+            '[MC] Ошибка создания бота:',
+            error
+        );
+
+        isConnecting = false;
+        scheduleReconnect();
+
+        return;
+    }
 
 
-    // =========================
-    // ПОДКЛЮЧЕНИЕ
-    // =========================
+    // ====================================
+    // SPAWN
+    // ====================================
 
     mcBot.once('spawn', () => {
 
         isConnecting = false;
 
-        console.log('[MC] Бот успешно подключился к MineBlaze!');
+        console.log(
+            '[MC] Бот успешно подключился к MineBlaze!'
+        );
 
-        // Если сервер требует /login
+        // Авторизация
         if (SERVER_PASSWORD) {
 
             setTimeout(() => {
 
-                console.log('[MC] Выполняю авторизацию...');
+                if (!mcBot) {
+                    return;
+                }
 
-                mcBot.chat(`/login ${SERVER_PASSWORD}`);
+                console.log(
+                    '[MC] Выполняю авторизацию...'
+                );
+
+                mcBot.chat(
+                    `/login ${SERVER_PASSWORD}`
+                );
 
             }, 3000);
         }
     });
 
 
-    // =========================
+    // ====================================
     // СООБЩЕНИЯ MINECRAFT
-    // =========================
+    // ====================================
 
     mcBot.on('messagestr', (message) => {
 
@@ -145,38 +173,41 @@ function connectMinecraft() {
     });
 
 
-    // =========================
+    // ====================================
     // KICK
-    // =========================
+    // ====================================
 
     mcBot.on('kicked', (reason) => {
 
         console.log('[MC] Бот был кикнут:');
         console.log(reason);
 
-        scheduleReconnect();
-
     });
 
 
-    // =========================
+    // ====================================
     // ОШИБКА
-    // =========================
+    // ====================================
 
     mcBot.on('error', (error) => {
 
-        console.error('[MC] Ошибка:', error.message);
+        console.error(
+            '[MC] Ошибка:',
+            error.message
+        );
 
     });
 
 
-    // =========================
+    // ====================================
     // ОТКЛЮЧЕНИЕ
-    // =========================
+    // ====================================
 
     mcBot.on('end', () => {
 
-        console.log('[MC] Соединение с MineBlaze закрыто.');
+        console.log(
+            '[MC] Соединение с MineBlaze закрыто.'
+        );
 
         isConnecting = false;
 
@@ -186,9 +217,9 @@ function connectMinecraft() {
 }
 
 
-// =========================
-// ПЕРЕПОДКЛЮЧЕНИЕ
-// =========================
+// ========================================
+// АВТОПЕРЕПОДКЛЮЧЕНИЕ
+// ========================================
 
 function scheduleReconnect() {
 
@@ -196,7 +227,9 @@ function scheduleReconnect() {
         return;
     }
 
-    console.log('[MC] Переподключение через 10 секунд...');
+    console.log(
+        '[MC] Переподключение через 10 секунд...'
+    );
 
     reconnectTimer = setTimeout(() => {
 
@@ -208,126 +241,257 @@ function scheduleReconnect() {
 }
 
 
-// =========================
+// ========================================
+// ПОЛУЧЕНИЕ TAB
+// ========================================
+
+function getTabList() {
+
+    if (!mcBot || !mcBot.players) {
+        return [];
+    }
+
+    return Object.values(mcBot.players)
+        .map(player => {
+
+            return {
+                name: player.username,
+                ping: player.ping
+            };
+
+        })
+        .sort((a, b) =>
+            a.name.localeCompare(b.name)
+        );
+}
+
+
+// ========================================
 // DISCORD READY
-// =========================
+// ========================================
 
 discord.once(Events.ClientReady, async (client) => {
 
-    console.log(`[DISCORD] Авторизован как ${client.user.tag}`);
-    console.log('[DISCORD] Бот готов принимать команды!');
+    console.log(
+        `[DISCORD] Авторизован как ${client.user.tag}`
+    );
 
-    // =========================
-    // РЕГИСТРАЦИЯ /KP2
-    // =========================
+    console.log(
+        '[DISCORD] Бот готов принимать команды!'
+    );
+
+
+    // ====================================
+    // РЕГИСТРАЦИЯ SLASH-КОМАНД
+    // ====================================
 
     const commands = [
 
         new SlashCommandBuilder()
             .setName('kp2')
             .setDescription('Перейти на KitPvP 2')
+            .toJSON(),
+
+        new SlashCommandBuilder()
+            .setName('tab')
+            .setDescription('Показать игроков из TAB Minecraft')
             .toJSON()
 
     ];
 
-    const rest = new REST({ version: '10' })
-        .setToken(DISCORD_TOKEN);
+
+    const rest = new REST({
+        version: '10'
+    }).setToken(DISCORD_TOKEN);
+
 
     try {
 
-        console.log('[DISCORD] Регистрирую команду /kp2...');
+        console.log(
+            '[DISCORD] Регистрирую команды...'
+        );
 
         await rest.put(
-            Routes.applicationCommands(DISCORD_CLIENT_ID),
+            Routes.applicationCommands(
+                DISCORD_CLIENT_ID
+            ),
             {
                 body: commands
             }
         );
 
-        console.log('[DISCORD] Команда /kp2 зарегистрирована!');
+        console.log(
+            '[DISCORD] Команды /kp2 и /tab зарегистрированы!'
+        );
 
     } catch (error) {
 
         console.error(
-            '[DISCORD] Ошибка регистрации команды:',
+            '[DISCORD] Ошибка регистрации команд:',
             error
         );
     }
 });
 
 
-// =========================
-// DISCORD COMMANDS
-// =========================
+// ========================================
+// DISCORD INTERACTIONS
+// ========================================
 
-discord.on(Events.InteractionCreate, async (interaction) => {
+discord.on(
+    Events.InteractionCreate,
+    async (interaction) => {
 
-    if (!interaction.isChatInputCommand()) {
-        return;
+        if (!interaction.isChatInputCommand()) {
+            return;
+        }
+
+
+        // ====================================
+        // ПРОВЕРКА КАНАЛА
+        // ====================================
+
+        if (interaction.channelId !== CHANNEL_ID) {
+
+            await interaction.reply({
+                content:
+                    '❌ Эту команду нельзя использовать в этом канале.',
+                ephemeral: true
+            });
+
+            return;
+        }
+
+
+        // ====================================
+        // /KP2
+        // ====================================
+
+        if (interaction.commandName === 'kp2') {
+
+            if (!mcBot || !mcBot.player) {
+
+                await interaction.reply({
+                    content:
+                        '❌ Minecraft-бот сейчас не подключён.',
+                    ephemeral: true
+                });
+
+                return;
+            }
+
+
+            console.log(
+                '[MC] Discord запросил переход на KitPvP 2'
+            );
+
+            // ВАЖНО:
+            // Это команда MineBlaze,
+            // а не Discord-команда.
+            mcBot.chat('/kp2');
+
+
+            await interaction.reply({
+                content:
+                    '⚔️ Бот отправил `/kp2` и переходит на KitPvP 2!'
+            });
+
+            return;
+        }
+
+
+        // ====================================
+        // /TAB
+        // ====================================
+
+        if (interaction.commandName === 'tab') {
+
+            if (!mcBot || !mcBot.player) {
+
+                await interaction.reply({
+                    content:
+                        '❌ Minecraft-бот сейчас не подключён.',
+                    ephemeral: true
+                });
+
+                return;
+            }
+
+
+            // Получаем уже имеющийся список
+            // от Mineflayer.
+            //
+            // НИКАКОЙ /tab В MINECRAFT
+            // ЗДЕСЬ НЕ ОТПРАВЛЯЕТСЯ.
+
+            const players = getTabList();
+
+
+            if (players.length === 0) {
+
+                await interaction.reply({
+                    content:
+                        '❌ Список TAB пока пустой.',
+                    ephemeral: true
+                });
+
+                return;
+            }
+
+
+            // Discord ограничивает длину сообщения.
+            // Показываем максимум 50 игроков.
+            const shownPlayers =
+                players.slice(0, 50);
+
+
+            let text =
+                '## 🟢 MineBlaze TAB\n' +
+                `**Игроков:** ${players.length}\n\n`;
+
+
+            for (const player of shownPlayers) {
+
+                let ping = '?';
+
+                if (typeof player.ping === 'number') {
+                    ping = `${player.ping} ms`;
+                }
+
+                text +=
+                    `\`${player.name}\` — ${ping}\n`;
+            }
+
+
+            if (players.length > 50) {
+
+                text +=
+                    `\n...и ещё ${players.length - 50} игроков.`;
+            }
+
+
+            await interaction.reply({
+                content: text
+            });
+
+
+            console.log(
+                `[DISCORD] Отправлен TAB: ${players.length} игроков`
+            );
+
+            return;
+        }
     }
-
-    // Нам нужна только /kp2
-    if (interaction.commandName !== 'kp2') {
-        return;
-    }
+);
 
 
-    // Проверяем канал
-    if (interaction.channelId !== CHANNEL_ID) {
-
-        await interaction.reply({
-            content: '❌ Эту команду нельзя использовать в этом канале.',
-            ephemeral: true
-        });
-
-        return;
-    }
-
-
-    // Проверяем Minecraft
-    if (!mcBot) {
-
-        await interaction.reply({
-            content: '❌ Minecraft-бот сейчас не подключён.',
-            ephemeral: true
-        });
-
-        return;
-    }
-
-
-    if (!mcBot.player) {
-
-        await interaction.reply({
-            content: '⏳ Minecraft-бот ещё подключается к серверу.',
-            ephemeral: true
-        });
-
-        return;
-    }
-
-
-    // Отвечаем Discord
-    await interaction.reply({
-        content: '🔄 Перехожу на KitPvP 2...'
-    });
-
-
-    // Отправляем команду Minecraft
-    console.log(
-        `[MC] Отправляю команду: ${KITPVP2_COMMAND}`
-    );
-
-    mcBot.chat(KITPVP2_COMMAND);
-
-});
-
-
-// =========================
+// ========================================
 // ЗАПУСК
-// =========================
+// ========================================
 
-console.log('[DISCORD] Подключение к Discord...');
+console.log(
+    '[DISCORD] Подключение к Discord...'
+);
 
 discord.login(DISCORD_TOKEN);
 
