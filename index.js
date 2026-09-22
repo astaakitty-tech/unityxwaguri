@@ -1,78 +1,115 @@
 const mineflayer = require('mineflayer');
 const {
     Client,
-    GatewayIntentBits,
-    EmbedBuilder
+    GatewayIntentBits
 } = require('discord.js');
 
 // ======================================================
-// CONFIG
+// НАСТРОЙКИ MINECRAFT
 // ======================================================
 
-const config = {
-    minecraft: {
-        host: 'mc.mineblaze.net',
-        port: 25565,
+const minecraftConfig = {
+    host: 'mc.mineblaze.net',
+    port: 25565,
 
-        // Если сервер требует лицензионный аккаунт:
-        // auth: 'microsoft',
-        //
-        // username тогда будет email Microsoft-аккаунта.
-        username: 'YOUR_MINECRAFT_NICK',
+    // Ник Minecraft-аккаунта бота
+    username: 'YOUR_MINECRAFT_NICK',
 
-        version: false
-    },
-
-    discord: {
-        token: 'YOUR_DISCORD_BOT_TOKEN',
-
-        // Канал, в котором разрешена команда !tab
-        channelId: 'YOUR_CHANNEL_ID'
-    }
+    version: false
 };
+
+// ======================================================
+// DISCORD
+// ======================================================
+
+const discordToken = process.env.DISCORD_TOKEN;
+
+// Проверяем, существует ли переменная в Render
+console.log(
+    '[DISCORD] Token найден:',
+    Boolean(discordToken)
+);
+
+if (!discordToken) {
+    console.error(
+        '[DISCORD] ОШИБКА: переменная DISCORD_TOKEN не найдена!'
+    );
+
+    process.exit(1);
+}
 
 // ======================================================
 // MINECRAFT BOT
 // ======================================================
 
 let mcBot = null;
+let reconnectTimer = null;
 
 function createMinecraftBot() {
     console.log('[MC] Подключение к MineBlaze...');
 
-    mcBot = mineflayer.createBot(config.minecraft);
+    try {
+        mcBot = mineflayer.createBot(minecraftConfig);
+    } catch (error) {
+        console.error(
+            '[MC] Ошибка создания бота:',
+            error.message
+        );
+
+        scheduleReconnect();
+        return;
+    }
+
+    mcBot.once('login', () => {
+        console.log('[MC] Minecraft login OK');
+    });
 
     mcBot.once('spawn', () => {
-        console.log('[MC] Бот вошёл на сервер');
+        console.log('[MC] Бот вошёл на сервер MineBlaze');
         console.log(`[MC] Ник: ${mcBot.username}`);
     });
 
-    mcBot.on('login', () => {
-        console.log('[MC] Login OK');
-    });
-
-    mcBot.on('error', err => {
-        console.log('[MC] ERROR:', err.message);
+    mcBot.on('error', error => {
+        console.error(
+            '[MC] ERROR:',
+            error.message
+        );
     });
 
     mcBot.on('kicked', reason => {
-        console.log('[MC] KICK:', reason);
+        console.log(
+            '[MC] Бот был кикнут:',
+            reason
+        );
     });
 
     mcBot.on('end', () => {
-        console.log('[MC] Соединение закрыто');
+        console.log(
+            '[MC] Соединение с MineBlaze закрыто'
+        );
 
-        // Переподключение через 10 секунд
-        setTimeout(() => {
-            createMinecraftBot();
-        }, 10000);
+        scheduleReconnect();
     });
+}
+
+function scheduleReconnect() {
+    if (reconnectTimer) return;
+
+    reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+
+        console.log(
+            '[MC] Повторное подключение...'
+        );
+
+        createMinecraftBot();
+    }, 10000);
 }
 
 createMinecraftBot();
 
 // ======================================================
-// УДАЛЯЕМ §-ЦВЕТА ИЗ MINECRAFT ТЕКСТА
+// УБИРАЕМ MINECRAFT COLOR CODES
 // ======================================================
 
 function stripMinecraftColors(text) {
@@ -80,7 +117,8 @@ function stripMinecraftColors(text) {
 
     return String(text)
         .replace(/§[0-9a-fk-or]/gi, '')
-        .replace(/&[0-9a-fk-or]/gi, '');
+        .replace(/&[0-9a-fk-or]/gi, '')
+        .trim();
 }
 
 // ======================================================
@@ -90,7 +128,7 @@ function stripMinecraftColors(text) {
 function getPlayerPrefix(username) {
     if (!mcBot) return '';
 
-    // Сначала пробуем teamMap
+    // Способ №1 — teamMap
     const teamName = mcBot.teamMap?.[username];
 
     if (teamName) {
@@ -99,19 +137,23 @@ function getPlayerPrefix(username) {
         if (team?.prefix) {
             return stripMinecraftColors(
                 team.prefix.toString()
-            ).trim();
+            );
         }
     }
 
-    // Иногда проще найти команду вручную
-    for (const team of Object.values(mcBot.teams || {})) {
+    // Способ №2 — ищем игрока во всех командах
+    const teams = Object.values(
+        mcBot.teams || {}
+    );
+
+    for (const team of teams) {
         if (!team.members) continue;
 
         if (team.members.includes(username)) {
             if (team.prefix) {
                 return stripMinecraftColors(
                     team.prefix.toString()
-                ).trim();
+                );
             }
         }
     }
@@ -120,83 +162,99 @@ function getPlayerPrefix(username) {
 }
 
 // ======================================================
-// ПОЛУЧАЕМ ИГРОКОВ
+// ПОЛУЧАЕМ СПИСОК ИГРОКОВ
 // ======================================================
 
 function getTabPlayers() {
     if (!mcBot) return [];
 
-    const players = Object.values(mcBot.players || {});
+    const players = Object.values(
+        mcBot.players || {}
+    );
 
     return players
         .map(player => {
-            const username = player.username || 'Unknown';
+            const username =
+                player.username || 'Unknown';
+
+            const ping =
+                typeof player.ping === 'number'
+                    ? player.ping
+                    : null;
+
+            const prefix =
+                getPlayerPrefix(username);
+
+            let displayName = username;
+
+            if (player.displayName) {
+                displayName =
+                    stripMinecraftColors(
+                        player.displayName.toString()
+                    );
+            }
 
             return {
                 username,
-                ping: typeof player.ping === 'number'
-                    ? player.ping
-                    : 0,
-
-                prefix: getPlayerPrefix(username),
-
-                displayName: player.displayName
-                    ? stripMinecraftColors(
-                        player.displayName.toString()
-                    )
-                    : username
+                ping,
+                prefix,
+                displayName
             };
         })
         .sort((a, b) =>
             a.username.localeCompare(
                 b.username,
                 'en',
-                { sensitivity: 'base' }
+                {
+                    sensitivity: 'base'
+                }
             )
         );
 }
 
 // ======================================================
-// ДЕЛАЕМ TAB
+// СОЗДАЁМ TAB
 // ======================================================
 
 function createTabText(players) {
     let result = '';
 
-    result += `Minecraft TAB\n`;
+    result += 'Minecraft TAB\n';
     result += `Игроков: ${players.length}\n`;
-    result += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    result += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
 
     for (const player of players) {
-        let prefix = player.prefix;
-
-        // Если prefix не найден, пробуем displayName
-        if (!prefix || prefix === player.username) {
-            prefix = '';
-        }
-
-        const ping = `${player.ping} ms`;
-
         let line = '';
 
-        if (prefix) {
-            line += `${prefix} `;
+        // Ранг / prefix
+        if (
+            player.prefix &&
+            player.prefix !== player.username
+        ) {
+            line += `${player.prefix} `;
         }
 
+        // Ник
         line += player.username;
 
-        line += `  ${ping}`;
+        // Ping
+        if (player.ping !== null) {
+            line += `  ${player.ping} ms`;
+        } else {
+            line += '  ? ms';
+        }
 
         result += line + '\n';
     }
 
-    result += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+    result +=
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
 
     return result;
 }
 
 // ======================================================
-// DISCORD
+// DISCORD CLIENT
 // ======================================================
 
 const discord = new Client({
@@ -207,116 +265,192 @@ const discord = new Client({
     ]
 });
 
+// ======================================================
+// DISCORD READY
+// ======================================================
+
 discord.once('ready', () => {
     console.log(
         `[DISCORD] Авторизован как ${discord.user.tag}`
     );
+
+    console.log(
+        '[DISCORD] Бот готов принимать команды!'
+    );
 });
 
+// ======================================================
+// DISCORD COMMANDS
+// ======================================================
+
 discord.on('messageCreate', async message => {
-    if (message.author.bot) return;
+    try {
+        // Игнорируем сообщения самого бота
+        if (message.author.bot) return;
 
-    // Только нужный канал
-    if (
-        config.discord.channelId &&
-        message.channel.id !== config.discord.channelId
-    ) {
-        return;
-    }
+        const command =
+            message.content
+                .trim()
+                .toLowerCase();
 
-    const command = message.content
-        .trim()
-        .toLowerCase();
+        // ==================================================
+        // !TAB
+        // ==================================================
 
-    // ==================================================
-    // !TAB
-    // ==================================================
+        if (command === '!tab') {
+            if (!mcBot) {
+                await message.reply(
+                    '❌ Minecraft-бот сейчас не подключён.'
+                );
 
-    if (command === '!tab') {
-        if (!mcBot) {
-            return message.reply(
-                '❌ Minecraft-бот сейчас не подключён.'
-            );
-        }
-
-        const players = getTabPlayers();
-
-        if (!players.length) {
-            return message.reply(
-                '❌ Mineflayer пока не получил список игроков.'
-            );
-        }
-
-        const tab = createTabText(players);
-
-        // Discord лимит сообщения — 2000 символов.
-        // Разбиваем TAB на несколько сообщений.
-        const lines = tab.split('\n');
-
-        let chunk = '```ansi\n';
-
-        for (const line of lines) {
-            if (
-                (chunk + line + '\n').length >= 1900
-            ) {
-                chunk += '```';
-
-                await message.channel.send(chunk);
-
-                chunk = '```ansi\n';
+                return;
             }
 
-            chunk += line + '\n';
+            const players =
+                getTabPlayers();
+
+            if (!players.length) {
+                await message.reply(
+                    '❌ Mineflayer пока не получил список игроков.'
+                );
+
+                return;
+            }
+
+            const tab =
+                createTabText(players);
+
+            const lines =
+                tab.split('\n');
+
+            let chunk =
+                '```text\n';
+
+            for (const line of lines) {
+                if (
+                    (chunk + line + '\n')
+                        .length >= 1900
+                ) {
+                    chunk += '```';
+
+                    await message.channel.send(
+                        chunk
+                    );
+
+                    chunk = '```text\n';
+                }
+
+                chunk += line + '\n';
+            }
+
+            if (chunk !== '```text\n') {
+                chunk += '```';
+
+                await message.channel.send(
+                    chunk
+                );
+            }
+
+            return;
         }
 
-        if (chunk.length > 10) {
-            chunk += '```';
+        // ==================================================
+        // !TABDEBUG
+        // ==================================================
 
-            await message.channel.send(chunk);
+        if (command === '!tabdebug') {
+            if (!mcBot) {
+                await message.reply(
+                    '❌ Minecraft-бот не подключён.'
+                );
+
+                return;
+            }
+
+            const players =
+                getTabPlayers();
+
+            let debug =
+                '```text\n';
+
+            debug +=
+                `Players: ${players.length}\n`;
+
+            debug +=
+                `Teams: ${
+                    Object.keys(
+                        mcBot.teams || {}
+                    ).length
+                }\n\n`;
+
+            // Игроки
+            debug +=
+                'PLAYERS:\n';
+
+            for (const player of players) {
+                debug +=
+                    `${player.username} | ` +
+                    `prefix="${player.prefix}" | ` +
+                    `ping=${player.ping}\n`;
+            }
+
+            debug += '\nTEAMS:\n';
+
+            // Teams
+            for (
+                const team of Object.values(
+                    mcBot.teams || {}
+                )
+            ) {
+                debug +=
+                    `TEAM: ${team.name}\n`;
+
+                debug +=
+                    `PREFIX: ${
+                        team.prefix
+                            ? team.prefix.toString()
+                            : ''
+                    }\n`;
+
+                debug +=
+                    `SUFFIX: ${
+                        team.suffix
+                            ? team.suffix.toString()
+                            : ''
+                    }\n`;
+
+                debug +=
+                    `MEMBERS: ${
+                        team.members
+                            ?.join(', ') || ''
+                    }\n\n`;
+            }
+
+            debug += '```';
+
+            // Discord ограничивает сообщения
+            if (debug.length > 1900) {
+                debug =
+                    debug.slice(0, 1850) +
+                    '\n...```';
+            }
+
+            await message.reply(debug);
+
+            return;
         }
-    }
 
-    // ==================================================
-    // !TABDEBUG
-    // ==================================================
+    } catch (error) {
+        console.error(
+            '[DISCORD] Ошибка команды:',
+            error
+        );
 
-    if (command === '!tabdebug') {
-        if (!mcBot) {
-            return message.reply(
-                '❌ Minecraft-бот не подключён.'
+        try {
+            await message.reply(
+                '❌ Произошла ошибка при выполнении команды.'
             );
-        }
-
-        const players = getTabPlayers();
-
-        let debug = '```text\n';
-        debug += `Players: ${players.length}\n`;
-        debug += `Teams: ${
-            Object.keys(mcBot.teams || {}).length
-        }\n\n`;
-
-        for (const team of Object.values(
-            mcBot.teams || {}
-        )) {
-            debug += `TEAM: ${team.name}\n`;
-            debug += `PREFIX: ${
-                team.prefix
-                    ? team.prefix.toString()
-                    : ''
-            }\n`;
-            debug += `MEMBERS: ${
-                team.members?.join(', ') || ''
-            }\n\n`;
-        }
-
-        debug += '```';
-
-        // Если debug слишком большой
-        if (debug.length > 1900) {
-            debug = debug.slice(0, 1850) + '\n...```';
-        }
-
-        await message.reply(debug);
+        } catch {}
     }
 });
 
@@ -324,4 +458,17 @@ discord.on('messageCreate', async message => {
 // DISCORD LOGIN
 // ======================================================
 
-discord.login(config.discord.token);
+discord.login(discordToken)
+    .then(() => {
+        console.log(
+            '[DISCORD] Подключение к Discord выполнено.'
+        );
+    })
+    .catch(error => {
+        console.error(
+            '[DISCORD] Ошибка авторизации:',
+            error.message
+        );
+
+        process.exit(1);
+    });
