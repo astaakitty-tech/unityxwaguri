@@ -1,9 +1,6 @@
 const {
   Client,
-  GatewayIntentBits,
-  REST,
-  Routes,
-  SlashCommandBuilder
+  GatewayIntentBits
 } = require('discord.js');
 
 const mineflayer = require('mineflayer');
@@ -16,7 +13,6 @@ const http = require('http');
 
 const {
   DISCORD_TOKEN,
-  DISCORD_CLIENT_ID,
 
   CHANNEL_ID,
   CHANNEL_ID_2,
@@ -39,8 +35,6 @@ const {
 
 const requiredEnv = {
   DISCORD_TOKEN,
-  DISCORD_CLIENT_ID,
-
   CHANNEL_ID,
 
   MINECRAFT_HOST,
@@ -64,17 +58,23 @@ for (const [name, value] of Object.entries(requiredEnv)) {
    RENDER HTTP SERVER
 ========================================================= */
 
-const HTTP_PORT = Number(PORT) || 10000;
+const HTTP_PORT =
+  Number(PORT) || 10000;
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(
+  (req, res) => {
 
-  res.writeHead(200, {
-    'Content-Type': 'text/plain; charset=utf-8'
-  });
+    res.writeHead(200, {
+      'Content-Type':
+        'text/plain; charset=utf-8'
+    });
 
-  res.end('Unity bot is online');
+    res.end(
+      'Unity bot is online'
+    );
 
-});
+  }
+);
 
 server.listen(
   HTTP_PORT,
@@ -94,7 +94,8 @@ server.listen(
 ========================================================= */
 
 const pool = new Pool({
-  connectionString: DATABASE_URL,
+  connectionString:
+    DATABASE_URL,
 
   ssl: {
     rejectUnauthorized: false
@@ -113,7 +114,9 @@ async function initDatabase() {
     )
   `);
 
-  console.log('✅ PostgreSQL готов');
+  console.log(
+    '✅ PostgreSQL готов'
+  );
 
 }
 
@@ -124,7 +127,9 @@ async function initDatabase() {
 
 const client = new Client({
   intents: [
-    GatewayIntentBits.Guilds
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
   ]
 });
 
@@ -161,99 +166,6 @@ function getChannelIds() {
 
 
 /* =========================================================
-   SLASH COMMANDS
-========================================================= */
-
-const commands = [
-
-  new SlashCommandBuilder()
-    .setName('kp2')
-    .setDescription('Перейти в KitPvP 2'),
-
-  new SlashCommandBuilder()
-    .setName('tab')
-    .setDescription('Показать игроков онлайн'),
-
-  new SlashCommandBuilder()
-    .setName('reconnect')
-    .setDescription('Переподключить Minecraft бота'),
-
-  new SlashCommandBuilder()
-    .setName('friendadd')
-    .setDescription('Добавить игрока в друзья')
-    .addStringOption(option =>
-      option
-        .setName('nick')
-        .setDescription('Ник игрока')
-        .setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName('friendremove')
-    .setDescription('Удалить игрока из друзей')
-    .addStringOption(option =>
-      option
-        .setName('nick')
-        .setDescription('Ник игрока')
-        .setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName('friends')
-    .setDescription('Показать список друзей'),
-
-  new SlashCommandBuilder()
-    .setName('enemyadd')
-    .setDescription('Добавить игрока во враги')
-    .addStringOption(option =>
-      option
-        .setName('nick')
-        .setDescription('Ник игрока')
-        .setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName('enemyremove')
-    .setDescription('Удалить игрока из врагов')
-    .addStringOption(option =>
-      option
-        .setName('nick')
-        .setDescription('Ник игрока')
-        .setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName('enemies')
-    .setDescription('Показать список врагов')
-
-].map(command => command.toJSON());
-
-
-/* =========================================================
-   REGISTER COMMANDS
-========================================================= */
-
-async function registerCommands() {
-
-  const rest = new REST({
-    version: '10'
-  }).setToken(DISCORD_TOKEN);
-
-  await rest.put(
-    Routes.applicationCommands(DISCORD_CLIENT_ID),
-    {
-      body: commands
-    }
-  );
-
-  console.log(
-    '✅ Slash-команды зарегистрированы'
-  );
-
-}
-
-
-/* =========================================================
    SEND MESSAGE TO BOTH CHANNELS
 ========================================================= */
 
@@ -278,7 +190,7 @@ async function sendDiscordMessage(text) {
       if (!channel) {
 
         console.log(
-          `❌ Канал ${channelId} не найден`
+          `❌ Discord канал ${channelId} не найден`
         );
 
         continue;
@@ -301,7 +213,7 @@ async function sendDiscordMessage(text) {
 
 
 /* =========================================================
-   TEXT CLEANER
+   CLEAN TEXT
 ========================================================= */
 
 function cleanText(value) {
@@ -332,7 +244,7 @@ function cleanText(value) {
 
 
 /* =========================================================
-   DATABASE HELPERS
+   DATABASE FUNCTIONS
 ========================================================= */
 
 async function addTrackedPlayer(
@@ -437,16 +349,14 @@ async function getTrackedMap() {
 
 
 /* =========================================================
-   COMMAND CHANNEL CHECK
+   CHECK CHANNEL
 ========================================================= */
 
-function isCorrectChannel(
-  interaction
-) {
+function isCorrectChannel(message) {
 
   return (
-    interaction.channelId === CHANNEL_ID ||
-    interaction.channelId === CHANNEL_ID_2
+    message.channel.id === CHANNEL_ID ||
+    message.channel.id === CHANNEL_ID_2
   );
 
 }
@@ -497,7 +407,8 @@ function connectMinecraft() {
 
     bot = mineflayer.createBot({
 
-      host: MINECRAFT_HOST,
+      host:
+        MINECRAFT_HOST,
 
       port:
         Number(MINECRAFT_PORT),
@@ -549,13 +460,47 @@ function connectMinecraft() {
       );
 
 
-      /* -----------------------------------------------------
-         LOGIN
-      ----------------------------------------------------- */
+      /* LOGIN */
 
       if (SERVER_PASSWORD) {
 
-        setTimeout(() => {
+        setTimeout(
+          () => {
+
+            if (!mcBot) {
+              return;
+            }
+
+            try {
+
+              mcBot.chat(
+                `/login ${SERVER_PASSWORD}`
+              );
+
+              console.log(
+                '🔐 Отправлена команда /login'
+              );
+
+            } catch (error) {
+
+              console.log(
+                '❌ Ошибка /login:',
+                error.message
+              );
+
+            }
+
+          },
+          1500
+        );
+
+      }
+
+
+      /* KP2 */
+
+      setTimeout(
+        () => {
 
           if (!mcBot) {
             return;
@@ -563,63 +508,29 @@ function connectMinecraft() {
 
           try {
 
-            mcBot.chat(
-              `/login ${SERVER_PASSWORD}`
-            );
+            mcBot.chat('/kp2');
 
             console.log(
-              '🔐 Отправлена команда /login'
+              '⚔️ Автоматически отправлена команда /kp2'
             );
+
+            isOnKp2 = true;
 
           } catch (error) {
 
             console.log(
-              '❌ Ошибка /login:',
+              '❌ Ошибка /kp2:',
               error.message
             );
 
           }
 
-        }, 1500);
-
-      }
-
-
-      /* -----------------------------------------------------
-         AUTOMATIC KP2
-      ----------------------------------------------------- */
-
-      setTimeout(() => {
-
-        if (!mcBot) {
-          return;
-        }
-
-        try {
-
-          mcBot.chat('/kp2');
-
-          console.log(
-            '⚔️ Автоматически отправлена команда /kp2'
-          );
-
-          isOnKp2 = true;
-
-        } catch (error) {
-
-          console.log(
-            '❌ Ошибка /kp2:',
-            error.message
-          );
-
-        }
-
-      }, 6000);
+        },
+        6000
+      );
 
 
-      /* -----------------------------------------------------
-         AUTO LEAVE 10 MINUTES
-      ----------------------------------------------------- */
+      /* AUTO LEAVE */
 
       clearTimeout(
         autoLeaveTimer
@@ -640,7 +551,7 @@ function connectMinecraft() {
 
 
             await sendDiscordMessage(
-              '⏰ **Прошло 10 минут.**\nMinecraft бот выходит с MineBlaze.\n\nДля повторного входа используй `/reconnect`.'
+              '⏰ **Прошло 10 минут.**\nMinecraft бот выходит с MineBlaze.\n\nДля повторного входа используй `#reconnect`.'
             );
 
 
@@ -679,7 +590,7 @@ function connectMinecraft() {
 
 
   /* =======================================================
-     MINECRAFT MESSAGES
+     MINECRAFT MESSAGE
   ======================================================= */
 
   bot.on(
@@ -706,9 +617,7 @@ function connectMinecraft() {
         text.toLowerCase();
 
 
-      /* -----------------------------------------------------
-         VERIFICATION
-      ----------------------------------------------------- */
+      /* VERIFICATION */
 
       const verificationDetected =
         lower.includes('captcha') ||
@@ -783,9 +692,7 @@ function connectMinecraft() {
   );
 
 
-  /* =======================================================
-     KICK
-  ======================================================= */
+  /* KICK */
 
   bot.on(
     'kicked',
@@ -800,9 +707,7 @@ function connectMinecraft() {
   );
 
 
-  /* =======================================================
-     ERROR
-  ======================================================= */
+  /* ERROR */
 
   bot.on(
     'error',
@@ -817,9 +722,7 @@ function connectMinecraft() {
   );
 
 
-  /* =======================================================
-     END
-  ======================================================= */
+  /* END */
 
   bot.on(
     'end',
@@ -970,9 +873,7 @@ async function reconnectMinecraft() {
   connectMinecraft();
 
 
-  /* -------------------------------------------------------
-     Ждём Minecraft
-  ------------------------------------------------------- */
+  /* Ждём подключения */
 
   for (
     let i = 0;
@@ -995,9 +896,7 @@ async function reconnectMinecraft() {
   }
 
 
-  /* -------------------------------------------------------
-     Ждём LOGIN + KP2
-  ------------------------------------------------------- */
+  /* Ждём LOGIN + KP2 */
 
   await new Promise(
     resolve =>
@@ -1130,7 +1029,6 @@ function splitText(
   const lines =
     text.split('\n');
 
-
   const chunks = [];
 
   let current = '';
@@ -1173,92 +1071,326 @@ function splitText(
 
 
 /* =========================================================
-   DISCORD INTERACTIONS
+   # COMMANDS
 ========================================================= */
 
 client.on(
-  'interactionCreate',
-  async interaction => {
+  'messageCreate',
+  async message => {
+
+    /* Игнорируем сообщения ботов */
+
+    if (message.author.bot) {
+      return;
+    }
+
+
+    /* Только разрешённые каналы */
 
     if (
-      !interaction.isChatInputCommand()
+      !isCorrectChannel(message)
     ) {
       return;
     }
 
 
-    try {
-
-      /* ---------------------------------------------------
-         CHANNEL CHECK
-      --------------------------------------------------- */
-
-      if (
-        !isCorrectChannel(
-          interaction
-        )
-      ) {
-
-        await interaction.reply({
-          content:
-            `❌ Используй команды в одном из разрешённых каналов.`,
-          ephemeral: true
-        });
-
-        return;
-
-      }
+    const content =
+      message.content.trim();
 
 
-      /* ===================================================
-         /KP2
-      =================================================== */
+    /* Команды должны начинаться с # */
 
-      if (
-        interaction.commandName === 'kp2'
-      ) {
+    if (
+      !content.startsWith('#')
+    ) {
+      return;
+    }
 
-        if (!mcBot) {
 
-          await interaction.reply(
-            '❌ Minecraft бот сейчас не подключён.'
+    const parts =
+      content
+        .slice(1)
+        .trim()
+        .split(/\s+/);
+
+
+    const command =
+      parts
+        .shift()
+        ?.toLowerCase();
+
+
+    const args =
+      parts;
+
+
+    if (!command) {
+      return;
+    }
+
+
+    /* =====================================================
+       #HELP
+    ===================================================== */
+
+    if (command === 'help') {
+
+      const helpText = [
+
+        '**🤖 Unity Bot — команды**',
+
+        '',
+
+        '`#help` — показать этот список',
+
+        '`#tab` — показать игроков онлайн',
+
+        '`#kp2` — перейти в KitPvP 2',
+
+        '`#reconnect` — переподключить Minecraft бота',
+
+        '',
+
+        '**🟢 Друзья**',
+
+        '`#friendadd Ник` — добавить друга',
+
+        '`#friendremove Ник` — удалить друга',
+
+        '`#friends` — список друзей',
+
+        '',
+
+        '**🔴 Враги**',
+
+        '`#enemyadd Ник` — добавить врага',
+
+        '`#enemyremove Ник` — удалить врага',
+
+        '`#enemies` — список врагов'
+
+      ].join('\n');
+
+
+      await message.reply(
+        helpText
+      );
+
+
+      return;
+    }
+
+
+    /* =====================================================
+       #TAB
+    ===================================================== */
+
+    if (command === 'tab') {
+
+      try {
+
+        /*
+         * Бот уже на КП2.
+         * Реконнект НЕ делаем.
+         */
+
+        if (
+          mcBot &&
+          isOnKp2
+        ) {
+
+          console.log(
+            '📋 #tab: бот уже на КП2, реконнект не нужен.'
           );
 
-          return;
+        } else {
+
+          /*
+           * Minecraft отключён.
+           */
+
+          if (!mcBot) {
+
+            console.log(
+              '📋 #tab: Minecraft отключён. Подключаю...'
+            );
+
+
+            shouldReconnect = true;
+
+
+            connectMinecraft();
+
+
+            for (
+              let i = 0;
+              i < 30;
+              i++
+            ) {
+
+              if (mcBot) {
+                break;
+              }
+
+
+              await new Promise(
+                resolve =>
+                  setTimeout(
+                    resolve,
+                    500
+                  )
+              );
+
+            }
+
+
+            if (!mcBot) {
+
+              await message.reply(
+                '❌ Minecraft бот не смог подключиться.'
+              );
+
+              return;
+            }
+
+
+            /*
+             * Ждём LOGIN + KP2.
+             */
+
+            await new Promise(
+              resolve =>
+                setTimeout(
+                  resolve,
+                  8000
+                )
+            );
+
+          }
+
+
+          /*
+           * Если бот подключён,
+           * но ещё не на КП2.
+           */
+
+          if (
+            mcBot &&
+            !isOnKp2
+          ) {
+
+            console.log(
+              '⚔️ #tab: отправляю /kp2.'
+            );
+
+
+            mcBot.chat(
+              '/kp2'
+            );
+
+
+            isOnKp2 = true;
+
+
+            await new Promise(
+              resolve =>
+                setTimeout(
+                  resolve,
+                  3000
+                )
+            );
+
+          }
 
         }
 
 
-        mcBot.chat('/kp2');
+        const text =
+          await getTabText();
 
-        isOnKp2 = true;
+
+        const chunks =
+          splitText(text);
 
 
-        await interaction.reply(
-          '⚔️ Команда `/kp2` отправлена.'
+        await message.reply(
+          `\`\`\`text\n${chunks[0]}\n\`\`\``
         );
 
 
-        return;
+        for (
+          let i = 1;
+          i < chunks.length;
+          i++
+        ) {
+
+          await message.channel.send(
+            `\`\`\`text\n${chunks[i]}\n\`\`\``
+          );
+
+        }
+
+      } catch (error) {
+
+        console.log(
+          '❌ Ошибка #tab:',
+          error.message
+        );
+
+
+        await message.reply(
+          '❌ Не удалось получить список игроков.'
+        );
 
       }
 
 
-      /* ===================================================
-         /RECONNECT
-      =================================================== */
-
-      if (
-        interaction.commandName === 'reconnect'
-      ) {
-
-        await interaction.deferReply();
+      return;
+    }
 
 
-        console.log(
-          '🔄 Запущен ручной реконнект.'
+    /* =====================================================
+       #KP2
+    ===================================================== */
+
+    if (command === 'kp2') {
+
+      if (!mcBot) {
+
+        await message.reply(
+          '❌ Minecraft бот сейчас не подключён.'
         );
 
+        return;
+      }
+
+
+      mcBot.chat('/kp2');
+
+      isOnKp2 = true;
+
+
+      await message.reply(
+        '⚔️ Команда `/kp2` отправлена.'
+      );
+
+
+      return;
+    }
+
+
+    /* =====================================================
+       #RECONNECT
+    ===================================================== */
+
+    if (command === 'reconnect') {
+
+      await message.reply(
+        '🔄 Переподключаю Minecraft...'
+      );
+
+
+      try {
 
         const connected =
           await reconnectMinecraft();
@@ -1266,479 +1398,314 @@ client.on(
 
         if (connected) {
 
-          await interaction.editReply(
+          await message.channel.send(
             '✅ Minecraft переподключён и отправлен на КП2.'
           );
 
         } else {
 
-          await interaction.editReply(
+          await message.channel.send(
             '❌ Minecraft не удалось подключить.'
           );
 
         }
 
+      } catch (error) {
 
-        return;
+        console.log(
+          '❌ Ошибка #reconnect:',
+          error.message
+        );
+
+
+        await message.channel.send(
+          '❌ Ошибка при переподключении.'
+        );
 
       }
 
 
-      /* ===================================================
-         /TAB
-      =================================================== */
-
-      if (
-        interaction.commandName === 'tab'
-      ) {
-
-        await interaction.deferReply();
+      return;
+    }
 
 
-        try {
+    /* =====================================================
+       #FRIENDADD
+    ===================================================== */
 
-          /*
-           * БОТ УЖЕ НА КП2
-           *
-           * НИКАКОГО RECONNECT.
-           */
+    if (command === 'friendadd') {
 
-          if (
-            mcBot &&
-            isOnKp2
-          ) {
-
-            console.log(
-              '📋 /tab: бот уже на КП2. Реконнект не нужен.'
-            );
-
-          } else {
-
-            /*
-             * Minecraft отключён
-             */
-
-            if (!mcBot) {
-
-              console.log(
-                '📋 /tab: Minecraft отключён. Подключаю...'
-              );
+      const nick =
+        args[0];
 
 
-              shouldReconnect = true;
+      if (!nick) {
 
-
-              connectMinecraft();
-
-
-              /*
-               * Ждём подключения
-               */
-
-              for (
-                let i = 0;
-                i < 30;
-                i++
-              ) {
-
-                if (mcBot) {
-                  break;
-                }
-
-
-                await new Promise(
-                  resolve =>
-                    setTimeout(
-                      resolve,
-                      500
-                    )
-                );
-
-              }
-
-
-              if (!mcBot) {
-
-                await interaction.editReply(
-                  '❌ Minecraft бот не смог подключиться.'
-                );
-
-                return;
-
-              }
-
-
-              /*
-               * Ждём LOGIN + KP2
-               */
-
-              await new Promise(
-                resolve =>
-                  setTimeout(
-                    resolve,
-                    8000
-                  )
-              );
-
-            }
-
-
-            /*
-             * Бот подключён,
-             * но ещё не на КП2.
-             */
-
-            if (
-              mcBot &&
-              !isOnKp2
-            ) {
-
-              console.log(
-                '⚔️ /tab: отправляю /kp2.'
-              );
-
-
-              mcBot.chat(
-                '/kp2'
-              );
-
-
-              isOnKp2 = true;
-
-
-              await new Promise(
-                resolve =>
-                  setTimeout(
-                    resolve,
-                    3000
-                  )
-              );
-
-            }
-
-          }
-
-
-          /* ------------------------------------------------
-             Получаем TAB
-          ------------------------------------------------ */
-
-          const text =
-            await getTabText();
-
-
-          const chunks =
-            splitText(text);
-
-
-          await interaction.editReply(
-            `\`\`\`text\n${chunks[0]}\n\`\`\``
-          );
-
-
-          for (
-            let i = 1;
-            i < chunks.length;
-            i++
-          ) {
-
-            await interaction.followUp(
-              `\`\`\`text\n${chunks[i]}\n\`\`\``
-            );
-
-          }
-
-        } catch (error) {
-
-          console.log(
-            '❌ Ошибка /tab:',
-            error.message
-          );
-
-
-          await interaction.editReply(
-            '❌ Не удалось получить список игроков.'
-          );
-
-        }
-
+        await message.reply(
+          '❌ Использование: `#friendadd Ник`'
+        );
 
         return;
-
       }
 
 
-      /* ===================================================
-         /FRIENDADD
-      =================================================== */
-
-      if (
-        interaction.commandName === 'friendadd'
-      ) {
-
-        const nick =
-          interaction.options.getString(
-            'nick',
-            true
-          );
+      await addTrackedPlayer(
+        nick,
+        'friend'
+      );
 
 
-        await addTrackedPlayer(
+      await message.reply(
+        `🟢 **${nick}** добавлен в друзья.`
+      );
+
+
+      return;
+    }
+
+
+    /* =====================================================
+       #FRIENDREMOVE
+    ===================================================== */
+
+    if (command === 'friendremove') {
+
+      const nick =
+        args[0];
+
+
+      if (!nick) {
+
+        await message.reply(
+          '❌ Использование: `#friendremove Ник`'
+        );
+
+        return;
+      }
+
+
+      const removed =
+        await removeTrackedPlayer(
           nick,
           'friend'
         );
 
 
-        await interaction.reply(
-          `🟢 **${nick}** добавлен в друзья.`
+      if (removed) {
+
+        await message.reply(
+          `🗑️ **${nick}** удалён из друзей.`
+        );
+
+      } else {
+
+        await message.reply(
+          `❌ **${nick}** не найден в списке друзей.`
+        );
+
+      }
+
+
+      return;
+    }
+
+
+    /* =====================================================
+       #FRIENDS
+    ===================================================== */
+
+    if (command === 'friends') {
+
+      const friends =
+        await getTrackedPlayers(
+          'friend'
         );
 
 
-        return;
-
-      }
-
-
-      /* ===================================================
-         /FRIENDREMOVE
-      =================================================== */
-
       if (
-        interaction.commandName === 'friendremove'
+        friends.length === 0
       ) {
 
-        const nick =
-          interaction.options.getString(
-            'nick',
-            true
-          );
-
-
-        const removed =
-          await removeTrackedPlayer(
-            nick,
-            'friend'
-          );
-
-
-        if (removed) {
-
-          await interaction.reply(
-            `🗑️ **${nick}** удалён из друзей.`
-          );
-
-        } else {
-
-          await interaction.reply(
-            `❌ **${nick}** не найден в списке друзей.`
-          );
-
-        }
-
-
-        return;
-
-      }
-
-
-      /* ===================================================
-         /FRIENDS
-      =================================================== */
-
-      if (
-        interaction.commandName === 'friends'
-      ) {
-
-        const friends =
-          await getTrackedPlayers(
-            'friend'
-          );
-
-
-        if (
-          friends.length === 0
-        ) {
-
-          await interaction.reply(
-            '🟢 Список друзей пуст.'
-          );
-
-          return;
-
-        }
-
-
-        const text =
-          friends
-            .map(
-              row =>
-                `🟢 ${row.name}`
-            )
-            .join('\n');
-
-
-        await interaction.reply(
-          `**🟢 Друзья (${friends.length})**\n${text}`
+        await message.reply(
+          '🟢 Список друзей пуст.'
         );
 
-
         return;
+      }
+
+
+      const text =
+        friends
+          .map(
+            row =>
+              `🟢 ${row.name}`
+          )
+          .join('\n');
+
+
+      const chunks =
+        splitText(text);
+
+
+      await message.reply(
+        `**🟢 Друзья (${friends.length})**\n${chunks[0]}`
+      );
+
+
+      for (
+        let i = 1;
+        i < chunks.length;
+        i++
+      ) {
+
+        await message.channel.send(
+          chunks[i]
+        );
 
       }
 
 
-      /* ===================================================
-         /ENEMYADD
-      =================================================== */
-
-      if (
-        interaction.commandName === 'enemyadd'
-      ) {
-
-        const nick =
-          interaction.options.getString(
-            'nick',
-            true
-          );
+      return;
+    }
 
 
-        await addTrackedPlayer(
+    /* =====================================================
+       #ENEMYADD
+    ===================================================== */
+
+    if (command === 'enemyadd') {
+
+      const nick =
+        args[0];
+
+
+      if (!nick) {
+
+        await message.reply(
+          '❌ Использование: `#enemyadd Ник`'
+        );
+
+        return;
+      }
+
+
+      await addTrackedPlayer(
+        nick,
+        'enemy'
+      );
+
+
+      await message.reply(
+        `🔴 **${nick}** добавлен во враги.`
+      );
+
+
+      return;
+    }
+
+
+    /* =====================================================
+       #ENEMYREMOVE
+    ===================================================== */
+
+    if (command === 'enemyremove') {
+
+      const nick =
+        args[0];
+
+
+      if (!nick) {
+
+        await message.reply(
+          '❌ Использование: `#enemyremove Ник`'
+        );
+
+        return;
+      }
+
+
+      const removed =
+        await removeTrackedPlayer(
           nick,
           'enemy'
         );
 
 
-        await interaction.reply(
-          `🔴 **${nick}** добавлен во враги.`
+      if (removed) {
+
+        await message.reply(
+          `🗑️ **${nick}** удалён из врагов.`
+        );
+
+      } else {
+
+        await message.reply(
+          `❌ **${nick}** не найден в списке врагов.`
+        );
+
+      }
+
+
+      return;
+    }
+
+
+    /* =====================================================
+       #ENEMIES
+    ===================================================== */
+
+    if (command === 'enemies') {
+
+      const enemies =
+        await getTrackedPlayers(
+          'enemy'
         );
 
 
-        return;
-
-      }
-
-
-      /* ===================================================
-         /ENEMYREMOVE
-      =================================================== */
-
       if (
-        interaction.commandName === 'enemyremove'
+        enemies.length === 0
       ) {
 
-        const nick =
-          interaction.options.getString(
-            'nick',
-            true
-          );
-
-
-        const removed =
-          await removeTrackedPlayer(
-            nick,
-            'enemy'
-          );
-
-
-        if (removed) {
-
-          await interaction.reply(
-            `🗑️ **${nick}** удалён из врагов.`
-          );
-
-        } else {
-
-          await interaction.reply(
-            `❌ **${nick}** не найден в списке врагов.`
-          );
-
-        }
-
-
-        return;
-
-      }
-
-
-      /* ===================================================
-         /ENEMIES
-      =================================================== */
-
-      if (
-        interaction.commandName === 'enemies'
-      ) {
-
-        const enemies =
-          await getTrackedPlayers(
-            'enemy'
-          );
-
-
-        if (
-          enemies.length === 0
-        ) {
-
-          await interaction.reply(
-            '🔴 Список врагов пуст.'
-          );
-
-          return;
-
-        }
-
-
-        const text =
-          enemies
-            .map(
-              row =>
-                `🔴 ${row.name}`
-            )
-            .join('\n');
-
-
-        await interaction.reply(
-          `**🔴 Враги (${enemies.length})**\n${text}`
+        await message.reply(
+          '🔴 Список врагов пуст.'
         );
 
-
         return;
-
       }
 
-    } catch (error) {
 
-      console.log(
-        '❌ Ошибка Discord команды:',
-        error.message
+      const text =
+        enemies
+          .map(
+            row =>
+              `🔴 ${row.name}`
+          )
+          .join('\n');
+
+
+      const chunks =
+        splitText(text);
+
+
+      await message.reply(
+        `**🔴 Враги (${enemies.length})**\n${chunks[0]}`
       );
 
 
-      try {
+      for (
+        let i = 1;
+        i < chunks.length;
+        i++
+      ) {
 
-        if (
-          interaction.deferred
-        ) {
+        await message.channel.send(
+          chunks[i]
+        );
 
-          await interaction.editReply(
-            '❌ Произошла ошибка при выполнении команды.'
-          );
-
-        } else if (
-          !interaction.replied
-        ) {
-
-          await interaction.reply({
-            content:
-              '❌ Произошла ошибка при выполнении команды.',
-            ephemeral: true
-          });
-
-        }
-
-      } catch (_) {
-        // ignore
       }
 
+
+      return;
     }
 
   }
@@ -1757,6 +1724,10 @@ client.once(
       `🤖 Discord бот запущен: ${discordClient.user.tag}`
     );
 
+    console.log(
+      '💬 Команды: #help, #tab, #kp2, #reconnect...'
+    );
+
   }
 );
 
@@ -1770,8 +1741,6 @@ async function start() {
   try {
 
     await initDatabase();
-
-    await registerCommands();
 
     await client.login(
       DISCORD_TOKEN
@@ -1840,14 +1809,18 @@ async function shutdown(
 
 
   try {
+
     await pool.end();
+
   } catch (_) {
     // ignore
   }
 
 
   try {
+
     client.destroy();
+
   } catch (_) {
     // ignore
   }
