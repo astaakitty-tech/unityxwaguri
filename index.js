@@ -17,7 +17,9 @@ const http = require('http');
 const {
   DISCORD_TOKEN,
   DISCORD_CLIENT_ID,
+
   CHANNEL_ID,
+  CHANNEL_ID_2,
 
   MINECRAFT_HOST,
   MINECRAFT_PORT,
@@ -30,6 +32,7 @@ const {
   PORT
 } = process.env;
 
+
 /* =========================================================
    ENV CHECK
 ========================================================= */
@@ -37,6 +40,7 @@ const {
 const requiredEnv = {
   DISCORD_TOKEN,
   DISCORD_CLIENT_ID,
+
   CHANNEL_ID,
 
   MINECRAFT_HOST,
@@ -49,9 +53,12 @@ const requiredEnv = {
 
 for (const [name, value] of Object.entries(requiredEnv)) {
   if (!value) {
-    throw new Error(`❌ Не указана переменная окружения: ${name}`);
+    throw new Error(
+      `❌ Не указана переменная окружения: ${name}`
+    );
   }
 }
+
 
 /* =========================================================
    RENDER HTTP SERVER
@@ -60,18 +67,27 @@ for (const [name, value] of Object.entries(requiredEnv)) {
 const HTTP_PORT = Number(PORT) || 10000;
 
 const server = http.createServer((req, res) => {
+
   res.writeHead(200, {
     'Content-Type': 'text/plain; charset=utf-8'
   });
 
   res.end('Unity bot is online');
+
 });
 
-server.listen(HTTP_PORT, '0.0.0.0', () => {
-  console.log(
-    `🌐 HTTP сервер запущен на 0.0.0.0:${HTTP_PORT}`
-  );
-});
+server.listen(
+  HTTP_PORT,
+  '0.0.0.0',
+  () => {
+
+    console.log(
+      `🌐 HTTP сервер запущен на 0.0.0.0:${HTTP_PORT}`
+    );
+
+  }
+);
+
 
 /* =========================================================
    POSTGRESQL
@@ -79,22 +95,28 @@ server.listen(HTTP_PORT, '0.0.0.0', () => {
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
+
   ssl: {
     rejectUnauthorized: false
   }
 });
 
+
 async function initDatabase() {
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS tracked_players (
       name TEXT PRIMARY KEY,
-      type TEXT NOT NULL CHECK (type IN ('friend', 'enemy')),
+      type TEXT NOT NULL
+        CHECK (type IN ('friend', 'enemy')),
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
 
   console.log('✅ PostgreSQL готов');
+
 }
+
 
 /* =========================================================
    DISCORD
@@ -106,6 +128,7 @@ const client = new Client({
   ]
 });
 
+
 /* =========================================================
    MINECRAFT STATE
 ========================================================= */
@@ -113,12 +136,29 @@ const client = new Client({
 let mcBot = null;
 
 let isOnKp2 = false;
+
 let connecting = false;
 
 let shouldReconnect = true;
 
 let reconnectTimer = null;
+
 let autoLeaveTimer = null;
+
+
+/* =========================================================
+   DISCORD CHANNELS
+========================================================= */
+
+function getChannelIds() {
+
+  return [
+    CHANNEL_ID,
+    CHANNEL_ID_2
+  ].filter(Boolean);
+
+}
+
 
 /* =========================================================
    SLASH COMMANDS
@@ -188,6 +228,7 @@ const commands = [
 
 ].map(command => command.toJSON());
 
+
 /* =========================================================
    REGISTER COMMANDS
 ========================================================= */
@@ -208,42 +249,56 @@ async function registerCommands() {
   console.log(
     '✅ Slash-команды зарегистрированы'
   );
+
 }
 
+
 /* =========================================================
-   DISCORD MESSAGE
+   SEND MESSAGE TO BOTH CHANNELS
 ========================================================= */
 
 async function sendDiscordMessage(text) {
 
-  try {
+  if (!client.isReady()) {
+    return;
+  }
 
-    if (!client.isReady()) {
-      return;
-    }
+  const channelIds =
+    getChannelIds();
 
-    const channel =
-      await client.channels.fetch(CHANNEL_ID);
+  for (const channelId of channelIds) {
 
-    if (!channel) {
+    try {
+
+      const channel =
+        await client.channels.fetch(
+          channelId
+        );
+
+      if (!channel) {
+
+        console.log(
+          `❌ Канал ${channelId} не найден`
+        );
+
+        continue;
+      }
+
+      await channel.send(text);
+
+    } catch (error) {
+
       console.log(
-        '❌ Discord канал не найден'
+        `❌ Ошибка отправки в канал ${channelId}:`,
+        error.message
       );
 
-      return;
     }
 
-    await channel.send(text);
-
-  } catch (error) {
-
-    console.log(
-      '❌ Ошибка отправки сообщения в Discord:',
-      error.message
-    );
-
   }
+
 }
+
 
 /* =========================================================
    TEXT CLEANER
@@ -272,10 +327,12 @@ function cleanText(value) {
       ' '
     )
     .trim();
+
 }
 
+
 /* =========================================================
-   DATABASE
+   DATABASE HELPERS
 ========================================================= */
 
 async function addTrackedPlayer(
@@ -285,10 +342,6 @@ async function addTrackedPlayer(
 
   const cleanName =
     name.trim();
-
-  // Удаляем старую запись,
-  // чтобы игрок не был одновременно
-  // другом и врагом.
 
   await pool.query(
     `
@@ -310,7 +363,9 @@ async function addTrackedPlayer(
       type
     ]
   );
+
 }
+
 
 async function removeTrackedPlayer(
   name,
@@ -331,7 +386,9 @@ async function removeTrackedPlayer(
     );
 
   return result.rowCount > 0;
+
 }
+
 
 async function getTrackedPlayers(
   type
@@ -349,7 +406,9 @@ async function getTrackedPlayers(
     );
 
   return result.rows;
+
 }
+
 
 async function getTrackedMap() {
 
@@ -373,10 +432,12 @@ async function getTrackedMap() {
   }
 
   return map;
+
 }
 
+
 /* =========================================================
-   CHANNEL CHECK
+   COMMAND CHANNEL CHECK
 ========================================================= */
 
 function isCorrectChannel(
@@ -384,10 +445,12 @@ function isCorrectChannel(
 ) {
 
   return (
-    interaction.channelId ===
-    CHANNEL_ID
+    interaction.channelId === CHANNEL_ID ||
+    interaction.channelId === CHANNEL_ID_2
   );
+
 }
+
 
 /* =========================================================
    CONNECT MINECRAFT
@@ -402,7 +465,9 @@ function connectMinecraft() {
     );
 
     return;
+
   }
+
 
   if (mcBot) {
 
@@ -411,17 +476,22 @@ function connectMinecraft() {
     );
 
     return;
+
   }
+
 
   connecting = true;
 
   isOnKp2 = false;
 
+
   console.log(
     `🔌 Подключение к ${MINECRAFT_HOST}:${MINECRAFT_PORT}...`
   );
 
+
   let bot;
+
 
   try {
 
@@ -429,15 +499,15 @@ function connectMinecraft() {
 
       host: MINECRAFT_HOST,
 
-      port: Number(
-        MINECRAFT_PORT
-      ),
+      port:
+        Number(MINECRAFT_PORT),
 
       username:
         MINECRAFT_USERNAME,
 
       version:
         MINECRAFT_VERSION
+
     });
 
   } catch (error) {
@@ -452,31 +522,72 @@ function connectMinecraft() {
     scheduleReconnect();
 
     return;
+
   }
+
 
   mcBot = bot;
 
   connecting = false;
 
+
   /* =======================================================
      SPAWN
   ======================================================= */
 
-  bot.once('spawn', async () => {
+  bot.once(
+    'spawn',
+    async () => {
 
-    console.log(
-      '✅ Minecraft бот вошёл на сервер'
-    );
+      console.log(
+        '✅ Minecraft бот вошёл на сервер'
+      );
 
-    await sendDiscordMessage(
-      '🟢 **Minecraft бот вошёл на сервер.**'
-    );
 
-    /*
-     * LOGIN
-     */
+      await sendDiscordMessage(
+        '🟢 **Minecraft бот вошёл на сервер.**'
+      );
 
-    if (SERVER_PASSWORD) {
+
+      /* -----------------------------------------------------
+         LOGIN
+      ----------------------------------------------------- */
+
+      if (SERVER_PASSWORD) {
+
+        setTimeout(() => {
+
+          if (!mcBot) {
+            return;
+          }
+
+          try {
+
+            mcBot.chat(
+              `/login ${SERVER_PASSWORD}`
+            );
+
+            console.log(
+              '🔐 Отправлена команда /login'
+            );
+
+          } catch (error) {
+
+            console.log(
+              '❌ Ошибка /login:',
+              error.message
+            );
+
+          }
+
+        }, 1500);
+
+      }
+
+
+      /* -----------------------------------------------------
+         AUTOMATIC KP2
+      ----------------------------------------------------- */
 
       setTimeout(() => {
 
@@ -486,106 +597,86 @@ function connectMinecraft() {
 
         try {
 
-          mcBot.chat(
-            `/login ${SERVER_PASSWORD}`
-          );
+          mcBot.chat('/kp2');
 
           console.log(
-            '🔐 Отправлена команда /login'
+            '⚔️ Автоматически отправлена команда /kp2'
           );
+
+          isOnKp2 = true;
 
         } catch (error) {
 
           console.log(
-            '❌ Ошибка /login:',
+            '❌ Ошибка /kp2:',
             error.message
           );
 
         }
 
-      }, 1500);
+      }, 6000);
+
+
+      /* -----------------------------------------------------
+         AUTO LEAVE 10 MINUTES
+      ----------------------------------------------------- */
+
+      clearTimeout(
+        autoLeaveTimer
+      );
+
+
+      autoLeaveTimer =
+        setTimeout(
+          async () => {
+
+            if (!mcBot) {
+              return;
+            }
+
+            console.log(
+              '⏰ Прошло 10 минут. Minecraft бот выходит.'
+            );
+
+
+            await sendDiscordMessage(
+              '⏰ **Прошло 10 минут.**\nMinecraft бот выходит с MineBlaze.\n\nДля повторного входа используй `/reconnect`.'
+            );
+
+
+            shouldReconnect = false;
+
+            isOnKp2 = false;
+
+
+            const oldBot =
+              mcBot;
+
+            mcBot = null;
+
+
+            try {
+
+              oldBot.quit(
+                '10 minutes'
+              );
+
+            } catch (error) {
+
+              console.log(
+                'Ошибка выхода:',
+                error.message
+              );
+
+            }
+
+          },
+          10 * 60 * 1000
+        );
+
     }
+  );
 
-    /*
-     * AUTOMATIC KP2
-     */
-
-    setTimeout(() => {
-
-      if (!mcBot) {
-        return;
-      }
-
-      try {
-
-        mcBot.chat('/kp2');
-
-        console.log(
-          '⚔️ Автоматически отправлена команда /kp2'
-        );
-
-        isOnKp2 = true;
-
-      } catch (error) {
-
-        console.log(
-          '❌ Ошибка /kp2:',
-          error.message
-        );
-
-      }
-
-    }, 6000);
-
-    /*
-     * AUTO LEAVE 10 MINUTES
-     */
-
-    clearTimeout(
-      autoLeaveTimer
-    );
-
-    autoLeaveTimer =
-      setTimeout(async () => {
-
-        if (!mcBot) {
-          return;
-        }
-
-        console.log(
-          '⏰ Прошло 10 минут. Minecraft бот выходит.'
-        );
-
-        await sendDiscordMessage(
-          '⏰ **Прошло 10 минут.**\nMinecraft бот выходит с MineBlaze.\n\nДля повторного входа используй `/reconnect`.'
-        );
-
-        shouldReconnect = false;
-        isOnKp2 = false;
-
-        const oldBot =
-          mcBot;
-
-        mcBot = null;
-
-        try {
-
-          oldBot.quit(
-            '10 minutes'
-          );
-
-        } catch (error) {
-
-          console.log(
-            'Ошибка выхода:',
-            error.message
-          );
-
-        }
-
-      }, 10 * 60 * 1000);
-
-  });
 
   /* =======================================================
      MINECRAFT MESSAGES
@@ -600,22 +691,24 @@ function connectMinecraft() {
           message.toString()
         );
 
+
       if (!text) {
         return;
       }
+
 
       console.log(
         `[MC] ${text}`
       );
 
+
       const lower =
         text.toLowerCase();
 
-      /*
-       * CAPTCHA / VERIFICATION
-       *
-       * Не пытаемся обходить проверку.
-       */
+
+      /* -----------------------------------------------------
+         VERIFICATION
+      ----------------------------------------------------- */
 
       const verificationDetected =
         lower.includes('captcha') ||
@@ -627,6 +720,7 @@ function connectMinecraft() {
           lower.includes('бот')
         );
 
+
       if (verificationDetected) {
 
         const urls =
@@ -634,12 +728,15 @@ function connectMinecraft() {
             /https?:\/\/[^\s]+/gi
           ) || [];
 
+
         console.log(
           '⚠️ Обнаружена проверка MineBlaze'
         );
 
+
         let notification =
           '⚠️ **MineBlaze запросил проверку.**\n';
+
 
         if (urls.length > 0) {
 
@@ -654,12 +751,16 @@ function connectMinecraft() {
 
         }
 
+
         await sendDiscordMessage(
           notification
         );
 
+
         shouldReconnect = false;
+
         isOnKp2 = false;
+
 
         try {
 
@@ -681,6 +782,7 @@ function connectMinecraft() {
     }
   );
 
+
   /* =======================================================
      KICK
   ======================================================= */
@@ -696,6 +798,7 @@ function connectMinecraft() {
 
     }
   );
+
 
   /* =======================================================
      ERROR
@@ -713,6 +816,7 @@ function connectMinecraft() {
     }
   );
 
+
   /* =======================================================
      END
   ======================================================= */
@@ -726,15 +830,19 @@ function connectMinecraft() {
         cleanText(reason)
       );
 
+
       clearTimeout(
         autoLeaveTimer
       );
 
+
       isOnKp2 = false;
+
 
       if (mcBot === bot) {
         mcBot = null;
       }
+
 
       if (shouldReconnect) {
 
@@ -750,7 +858,9 @@ function connectMinecraft() {
 
     }
   );
+
 }
+
 
 /* =========================================================
    AUTOMATIC RECONNECT
@@ -762,27 +872,37 @@ function scheduleReconnect() {
     return;
   }
 
+
   if (reconnectTimer) {
     return;
   }
+
 
   console.log(
     '🔄 Повторное подключение через 5 секунд...'
   );
 
+
   reconnectTimer =
-    setTimeout(() => {
+    setTimeout(
+      () => {
 
-      reconnectTimer = null;
+        reconnectTimer = null;
 
-      if (!shouldReconnect) {
-        return;
-      }
 
-      connectMinecraft();
+        if (!shouldReconnect) {
+          return;
+        }
 
-    }, 5000);
+
+        connectMinecraft();
+
+      },
+      5000
+    );
+
 }
+
 
 /* =========================================================
    MANUAL RECONNECT
@@ -796,19 +916,24 @@ async function reconnectMinecraft() {
 
   reconnectTimer = null;
 
+
   clearTimeout(
     autoLeaveTimer
   );
 
   autoLeaveTimer = null;
 
+
   shouldReconnect = false;
+
   isOnKp2 = false;
+
 
   const oldBot =
     mcBot;
 
   mcBot = null;
+
 
   if (oldBot) {
 
@@ -826,11 +951,9 @@ async function reconnectMinecraft() {
       );
 
     }
+
   }
 
-  /*
-   * Ждём закрытия старого соединения.
-   */
 
   await new Promise(
     resolve =>
@@ -840,13 +963,16 @@ async function reconnectMinecraft() {
       )
   );
 
+
   shouldReconnect = true;
+
 
   connectMinecraft();
 
-  /*
-   * Ждём подключения.
-   */
+
+  /* -------------------------------------------------------
+     Ждём Minecraft
+  ------------------------------------------------------- */
 
   for (
     let i = 0;
@@ -865,12 +991,13 @@ async function reconnectMinecraft() {
           500
         )
     );
+
   }
 
-  /*
-   * Даём серверу время
-   * на авторизацию и /kp2.
-   */
+
+  /* -------------------------------------------------------
+     Ждём LOGIN + KP2
+  ------------------------------------------------------- */
 
   await new Promise(
     resolve =>
@@ -880,8 +1007,11 @@ async function reconnectMinecraft() {
       )
   );
 
+
   return !!mcBot;
+
 }
+
 
 /* =========================================================
    TAB
@@ -894,10 +1024,13 @@ async function getTabText() {
     return (
       '❌ Minecraft бот сейчас не подключён.'
     );
+
   }
+
 
   const tracked =
     await getTrackedMap();
+
 
   const players =
     Object.values(
@@ -915,34 +1048,43 @@ async function getTabText() {
           )
       );
 
+
   if (players.length === 0) {
 
     return (
       '📋 На сервере игроков не найдено.'
     );
+
   }
 
+
   const lines = [];
+
 
   for (const player of players) {
 
     const name =
       player.username;
 
+
     const type =
       tracked.get(
         name.toLowerCase()
       );
 
+
     let icon = '⚪';
+
 
     if (type === 'friend') {
       icon = '🟢';
     }
 
+
     if (type === 'enemy') {
       icon = '🔴';
     }
+
 
     const ping =
       Number.isFinite(
@@ -951,10 +1093,13 @@ async function getTabText() {
         ? `${player.ping} ms`
         : '—';
 
+
     lines.push(
       `${icon} | ${name} | ${ping}`
     );
+
   }
+
 
   lines.sort(
     (a, b) =>
@@ -967,11 +1112,14 @@ async function getTabText() {
       )
   );
 
+
   return lines.join('\n');
+
 }
 
+
 /* =========================================================
-   SPLIT DISCORD TEXT
+   SPLIT DISCORD MESSAGE
 ========================================================= */
 
 function splitText(
@@ -982,9 +1130,11 @@ function splitText(
   const lines =
     text.split('\n');
 
+
   const chunks = [];
 
   let current = '';
+
 
   for (const line of lines) {
 
@@ -1006,18 +1156,24 @@ function splitText(
       current +=
         (current ? '\n' : '') +
         line;
+
     }
+
   }
+
 
   if (current) {
     chunks.push(current);
   }
 
+
   return chunks;
+
 }
 
+
 /* =========================================================
-   DISCORD COMMANDS
+   DISCORD INTERACTIONS
 ========================================================= */
 
 client.on(
@@ -1030,7 +1186,12 @@ client.on(
       return;
     }
 
+
     try {
+
+      /* ---------------------------------------------------
+         CHANNEL CHECK
+      --------------------------------------------------- */
 
       if (
         !isCorrectChannel(
@@ -1040,12 +1201,14 @@ client.on(
 
         await interaction.reply({
           content:
-            `❌ Используй команды в канале <#${CHANNEL_ID}>.`,
+            `❌ Используй команды в одном из разрешённых каналов.`,
           ephemeral: true
         });
 
         return;
+
       }
+
 
       /* ===================================================
          /KP2
@@ -1062,18 +1225,24 @@ client.on(
           );
 
           return;
+
         }
+
 
         mcBot.chat('/kp2');
 
         isOnKp2 = true;
 
+
         await interaction.reply(
           '⚔️ Команда `/kp2` отправлена.'
         );
 
+
         return;
+
       }
+
 
       /* ===================================================
          /RECONNECT
@@ -1085,12 +1254,15 @@ client.on(
 
         await interaction.deferReply();
 
+
         console.log(
           '🔄 Запущен ручной реконнект.'
         );
 
+
         const connected =
           await reconnectMinecraft();
+
 
         if (connected) {
 
@@ -1106,8 +1278,11 @@ client.on(
 
         }
 
+
         return;
+
       }
+
 
       /* ===================================================
          /TAB
@@ -1119,10 +1294,11 @@ client.on(
 
         await interaction.deferReply();
 
+
         try {
 
           /*
-           * ЕСЛИ БОТ УЖЕ НА КП2:
+           * БОТ УЖЕ НА КП2
            *
            * НИКАКОГО RECONNECT.
            */
@@ -1133,13 +1309,13 @@ client.on(
           ) {
 
             console.log(
-              '📋 /tab: бот уже на КП2, реконнект не нужен.'
+              '📋 /tab: бот уже на КП2. Реконнект не нужен.'
             );
 
           } else {
 
             /*
-             * Minecraft вообще отключён.
+             * Minecraft отключён
              */
 
             if (!mcBot) {
@@ -1148,12 +1324,15 @@ client.on(
                 '📋 /tab: Minecraft отключён. Подключаю...'
               );
 
+
               shouldReconnect = true;
+
 
               connectMinecraft();
 
+
               /*
-               * Ждём подключения.
+               * Ждём подключения
                */
 
               for (
@@ -1166,6 +1345,7 @@ client.on(
                   break;
                 }
 
+
                 await new Promise(
                   resolve =>
                     setTimeout(
@@ -1173,7 +1353,9 @@ client.on(
                       500
                     )
                 );
+
               }
+
 
               if (!mcBot) {
 
@@ -1182,10 +1364,12 @@ client.on(
                 );
 
                 return;
+
               }
 
+
               /*
-               * Ждём /login и /kp2.
+               * Ждём LOGIN + KP2
                */
 
               await new Promise(
@@ -1195,10 +1379,12 @@ client.on(
                     8000
                   )
               );
+
             }
 
+
             /*
-             * Если бот подключён,
+             * Бот подключён,
              * но ещё не на КП2.
              */
 
@@ -1208,14 +1394,17 @@ client.on(
             ) {
 
               console.log(
-                '⚔️ /tab: бот ещё не на КП2, отправляю /kp2.'
+                '⚔️ /tab: отправляю /kp2.'
               );
+
 
               mcBot.chat(
                 '/kp2'
               );
 
+
               isOnKp2 = true;
+
 
               await new Promise(
                 resolve =>
@@ -1224,22 +1413,28 @@ client.on(
                     3000
                   )
               );
+
             }
+
           }
 
-          /*
-           * Получаем актуальный TAB.
-           */
+
+          /* ------------------------------------------------
+             Получаем TAB
+          ------------------------------------------------ */
 
           const text =
             await getTabText();
 
+
           const chunks =
             splitText(text);
+
 
           await interaction.editReply(
             `\`\`\`text\n${chunks[0]}\n\`\`\``
           );
+
 
           for (
             let i = 1;
@@ -1250,6 +1445,7 @@ client.on(
             await interaction.followUp(
               `\`\`\`text\n${chunks[i]}\n\`\`\``
             );
+
           }
 
         } catch (error) {
@@ -1259,13 +1455,18 @@ client.on(
             error.message
           );
 
+
           await interaction.editReply(
             '❌ Не удалось получить список игроков.'
           );
+
         }
 
+
         return;
+
       }
+
 
       /* ===================================================
          /FRIENDADD
@@ -1281,17 +1482,22 @@ client.on(
             true
           );
 
+
         await addTrackedPlayer(
           nick,
           'friend'
         );
 
+
         await interaction.reply(
           `🟢 **${nick}** добавлен в друзья.`
         );
 
+
         return;
+
       }
+
 
       /* ===================================================
          /FRIENDREMOVE
@@ -1307,11 +1513,13 @@ client.on(
             true
           );
 
+
         const removed =
           await removeTrackedPlayer(
             nick,
             'friend'
           );
+
 
         if (removed) {
 
@@ -1324,10 +1532,14 @@ client.on(
           await interaction.reply(
             `❌ **${nick}** не найден в списке друзей.`
           );
+
         }
 
+
         return;
+
       }
+
 
       /* ===================================================
          /FRIENDS
@@ -1342,6 +1554,7 @@ client.on(
             'friend'
           );
 
+
         if (
           friends.length === 0
         ) {
@@ -1351,7 +1564,9 @@ client.on(
           );
 
           return;
+
         }
+
 
         const text =
           friends
@@ -1361,12 +1576,16 @@ client.on(
             )
             .join('\n');
 
+
         await interaction.reply(
           `**🟢 Друзья (${friends.length})**\n${text}`
         );
 
+
         return;
+
       }
+
 
       /* ===================================================
          /ENEMYADD
@@ -1382,17 +1601,22 @@ client.on(
             true
           );
 
+
         await addTrackedPlayer(
           nick,
           'enemy'
         );
 
+
         await interaction.reply(
           `🔴 **${nick}** добавлен во враги.`
         );
 
+
         return;
+
       }
+
 
       /* ===================================================
          /ENEMYREMOVE
@@ -1408,11 +1632,13 @@ client.on(
             true
           );
 
+
         const removed =
           await removeTrackedPlayer(
             nick,
             'enemy'
           );
+
 
         if (removed) {
 
@@ -1425,10 +1651,14 @@ client.on(
           await interaction.reply(
             `❌ **${nick}** не найден в списке врагов.`
           );
+
         }
 
+
         return;
+
       }
+
 
       /* ===================================================
          /ENEMIES
@@ -1443,6 +1673,7 @@ client.on(
             'enemy'
           );
 
+
         if (
           enemies.length === 0
         ) {
@@ -1452,7 +1683,9 @@ client.on(
           );
 
           return;
+
         }
+
 
         const text =
           enemies
@@ -1462,11 +1695,14 @@ client.on(
             )
             .join('\n');
 
+
         await interaction.reply(
           `**🔴 Враги (${enemies.length})**\n${text}`
         );
 
+
         return;
+
       }
 
     } catch (error) {
@@ -1475,6 +1711,7 @@ client.on(
         '❌ Ошибка Discord команды:',
         error.message
       );
+
 
       try {
 
@@ -1501,9 +1738,12 @@ client.on(
       } catch (_) {
         // ignore
       }
+
     }
+
   }
 );
+
 
 /* =========================================================
    DISCORD READY
@@ -1519,6 +1759,7 @@ client.once(
 
   }
 );
+
 
 /* =========================================================
    START
@@ -1536,11 +1777,6 @@ async function start() {
       DISCORD_TOKEN
     );
 
-    /*
-     * После запуска Discord
-     * сразу подключаем Minecraft.
-     */
-
     connectMinecraft();
 
   } catch (error) {
@@ -1551,10 +1787,13 @@ async function start() {
     );
 
     process.exit(1);
+
   }
+
 }
 
 start();
+
 
 /* =========================================================
    SHUTDOWN
@@ -1568,15 +1807,19 @@ async function shutdown(
     `🛑 Получен ${signal}. Останавливаем бота...`
   );
 
+
   shouldReconnect = false;
+
 
   clearTimeout(
     reconnectTimer
   );
 
+
   clearTimeout(
     autoLeaveTimer
   );
+
 
   if (mcBot) {
 
@@ -1590,8 +1833,11 @@ async function shutdown(
       // ignore
     }
 
+
     mcBot = null;
+
   }
+
 
   try {
     await pool.end();
@@ -1599,26 +1845,34 @@ async function shutdown(
     // ignore
   }
 
+
   try {
     client.destroy();
   } catch (_) {
     // ignore
   }
 
-  server.close(() => {
-    process.exit(0);
-  });
+
+  server.close(
+    () => {
+      process.exit(0);
+    }
+  );
+
 
   setTimeout(
     () => process.exit(0),
     5000
   );
+
 }
+
 
 process.on(
   'SIGINT',
   () => shutdown('SIGINT')
 );
+
 
 process.on(
   'SIGTERM',
