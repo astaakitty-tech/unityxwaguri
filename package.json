@@ -1,7 +1,6 @@
 {
-  "name": "unity-discord-minecraft-bot",
+  "name": "mineblaze-discord-bot",
   "version": "1.0.0",
-  "description": "Unity Discord Minecraft bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
